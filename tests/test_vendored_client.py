@@ -404,3 +404,32 @@ def test_an_undecodable_response_does_not_carry_its_body_either() -> None:
 
     assert "SECRET-REG-TOKEN" not in str(excinfo.value)
     assert "unexpected response" in str(excinfo.value)
+
+
+def test_a_retried_command_carries_the_new_session_key() -> None:
+    """_with_reauth retries after minting a session; captured headers would send the dead one."""
+    client = _client()
+    seen: list[str] = []
+
+    def put_request(url, path, headers, data):
+        seen.append(headers["Authorization"])
+        # Fails for as long as the dead session key is in use, which is what drives
+        # _with_reauth to its re-authentication attempt.
+        if client.session_key == "cached-key":
+            raise frigidaire.FrigidaireException("Request failed", status_code=401)
+        return {}
+
+    def re_authenticate() -> None:
+        client.session_key = "fresh-session-key"
+
+    with (
+        patch.object(client, "put_request", put_request),
+        patch.object(client, "re_authenticate", re_authenticate),
+    ):
+        client.execute_action(
+            frigidaire.Appliance({"applianceId": "DH-1", "applianceData": {"modelName": "DH"}}),
+            frigidaire.Action.set_humidity(50),
+        )
+
+    assert seen[0] == "Bearer cached-key"
+    assert seen[-1] == "Bearer fresh-session-key"

@@ -954,11 +954,14 @@ class Frigidaire:
         :return:
         """
         path = f"/appliance/api/v2/appliances/{appliance.appliance_id}/command"
-        headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
         for component in action:
             data = {component.name: component.value}
 
             def send(data: dict = data) -> None:
+                # Headers are built per attempt, not captured: _with_reauth retries this
+                # closure after minting a new session key, and headers built once outside
+                # would keep sending the dead bearer token on every retry.
+                headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
                 self.put_request(self.regional_base_url, path, headers, data)
 
             self._with_reauth(send)

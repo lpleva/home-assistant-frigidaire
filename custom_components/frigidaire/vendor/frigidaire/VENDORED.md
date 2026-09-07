@@ -66,6 +66,10 @@ Each entry names the audit finding it answers.
   endpoint's error body can carry a `regToken`. `authenticate()` also raises
   with `status_code=401` and `error_code="invalid_credentials"` when Gigya
   reports a login failure, so callers can classify it without string matching.
+- **Retry correctness — `execute_action` builds its headers per attempt.**
+  `_with_reauth` retries the closure after minting a new session key; headers
+  built once outside it kept sending the dead bearer token on every retry, so
+  the re-authentication could never help.
 - **M9 — the rate limiter no longer sleeps while holding its lock.**
   `RateLimiter.wait()` computes the delay under the lock and sleeps outside it.
 - **M10 — scope keys are hashed and the session can be closed.** The shared
