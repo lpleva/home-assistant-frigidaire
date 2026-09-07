@@ -93,6 +93,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], SwitchEntity):
     """A switch for a single Frigidaire boolean setting."""
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: FrigidaireApplianceCoordinator,

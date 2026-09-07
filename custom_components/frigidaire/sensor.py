@@ -160,6 +160,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
     """Ambient temperature reported by a Frigidaire dehumidifier."""
 
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.TEMPERATURE
     _attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -209,6 +210,7 @@ class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
 class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
     """Report cumulative air-filter runtime from the owning appliance entity."""
 
+    _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.DURATION
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:air-filter"
@@ -242,6 +244,8 @@ class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordin
 
 class FrigidaireDetailSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
     """A sensor backed by a single reported detail, described by SENSOR_DESCRIPTIONS."""
+
+    _attr_has_entity_name = True
 
     def __init__(
         self,

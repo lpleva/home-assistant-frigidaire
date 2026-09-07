@@ -30,8 +30,10 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 
 ### Dehumidifier
 
-- Modes: Normal (Dry), Boost (Continuous), Auto, Sleep
-- Target humidity control (35-85%, 5% steps)
+- Modes: Normal (Dry), Boost (Continuous), Auto, Sleep, plus Smart and Fan on the models
+	that report them (they appear once the appliance is in one)
+- Target humidity control (35-85%, 5% steps). Setting a target switches the unit to Dry
+	only when the current mode ignores the setpoint, so a unit in Continuous stays there
 - Fan speed control via the `frigidaire.set_fan_mode` service: `low`, `medium`, `high`
 - Extra state attributes: `current_humidity`, `check_filter`, `fan_mode`, `bin_full`
 
@@ -107,6 +109,32 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 ## Reconfiguring Optional Entities
 
 Go to **Settings → Devices & Services → Frigidaire → Configure** to change which optional entities are enabled for each device.
+
+## Upgrading to 0.2.0
+
+0.2.0 is a security release. Three things change that you can see:
+
+1. **Your Frigidaire password is no longer stored in Home Assistant.** Older versions kept
+	it in cleartext in `.storage/core.config_entries`, and therefore in every backup. The
+	integration now runs on the session key it already had, and the password is removed from
+	the config entry the first time 0.2.0 starts. If the session ever stops working, Home
+	Assistant shows a **Re-authenticate** card and asks for the password then, instead of
+	retrying silently forever the way it used to.
+2. **The session key moves to `.storage/frigidaire-<entry_id>.json`, mode 0600.** It used to
+	sit next to `configuration.yaml`, world-readable. The old files are read once (so you keep
+	your session) and then deleted. The key is still inside a full Home Assistant backup:
+	treat a backup as something that can drive your appliance.
+3. **New entities get device-prefixed names and IDs.** The diagnostic entities used to be
+	called just "Connectivity" or "Bucket Status"; they are now
+	"Bedroom AC Connectivity" and so on, so a second appliance no longer produces
+	`binary_sensor.connectivity_2`. Entities already in your registry keep the IDs they have —
+	nothing to fix — but a fresh install, or an appliance you add now, uses the new form. Check
+	any automation you write against the ID shown on the device page.
+
+The client library is also vendored into `custom_components/frigidaire/vendor/frigidaire/`
+rather than installed from PyPI, because the published build disabled TLS certificate
+verification on every request, including the one carrying your password. See
+`vendor/frigidaire/VENDORED.md` for the full list of changes.
 
 ## Upgrading from <=0.1.26
 

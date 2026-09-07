@@ -95,6 +95,8 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_FAN_MODE.items()}
 class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], HumidifierEntity):
     """Representation of a Frigidaire dehumidifier."""
 
+    _attr_has_entity_name = True
+
     def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None):
         """Build FrigidaireDehumidifier.
 
@@ -107,7 +109,9 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
-        self._attr_name = self._appliance.nickname
+        # The primary entity for the device carries the device's own name; setting both
+        # to the nickname is exactly what has_entity_name replaced.
+        self._attr_name = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,

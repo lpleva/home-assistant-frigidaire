@@ -125,6 +125,8 @@ OPTIMISTIC_WINDOW = 5  # seconds
 class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
+    _attr_has_entity_name = True
+
     def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None):
         """Build FrigidaireClimate.
 
@@ -148,7 +150,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
-        self._attr_name = self._appliance.nickname
+        # The primary entity for the device carries the device's own name; setting both
+        # to the nickname is exactly what has_entity_name replaced.
+        self._attr_name = None
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,

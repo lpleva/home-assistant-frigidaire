@@ -41,6 +41,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class FrigidaireTimerNumber(CoordinatorEntity[FrigidaireApplianceCoordinator], NumberEntity):
     """AC ON or OFF timer, expressed in seconds with 30-minute steps."""
 
+    _attr_has_entity_name = True
+
     def __init__(
         self,
         coordinator: FrigidaireApplianceCoordinator,

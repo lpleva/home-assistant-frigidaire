@@ -142,3 +142,22 @@ async def test_a_pre_020_session_file_is_migrated_and_removed(
     assert client_cls.call_args.kwargs["session_key"] == "old-key"
     assert not (tmp_path / "frigidaire.json").exists()
     assert (tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json").is_file()
+
+
+async def test_entity_ids_and_names_carry_the_device(hass: HomeAssistant, setup_entry) -> None:
+    """Two appliances on one account must not produce binary_sensor.connectivity and _2."""
+    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+
+    registry = er.async_get(hass)
+    entity_ids = {e.entity_id for e in er.async_entries_for_config_entry(registry, entry.entry_id)}
+
+    assert "binary_sensor.bedroom_ac_connectivity" in entity_ids
+    assert "binary_sensor.basement_dehumidifier_connectivity" in entity_ids
+    assert not any(entity_id.endswith("_2") for entity_id in entity_ids)
+    # The primary entity keeps the device's own name rather than repeating it.
+    assert hass.states.get("humidifier.basement_dehumidifier").attributes["friendly_name"] == (
+        "Basement Dehumidifier"
+    )
+    assert hass.states.get("binary_sensor.bedroom_ac_connectivity").attributes["friendly_name"] == (
+        "Bedroom AC Connectivity"
+    )

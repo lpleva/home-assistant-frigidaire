@@ -70,6 +70,11 @@ class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordina
     disconnected appliance keeps returning its last-known reported properties.
     """
 
+    # has_entity_name: Home Assistant prefixes the device name, so this entity reads as
+    # "Basement Dehumidifier Connectivity" and its entity_id carries the device too.
+    # Without it, every appliance on the account produced a bare binary_sensor.connectivity
+    # and the second one silently became _2.
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -104,6 +109,7 @@ class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordina
 class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
     """Binary sensor that is ON when the filter needs attention."""
 
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
@@ -149,6 +155,7 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
     of a device-class pair.
     """
 
+    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_translation_key = "bucket_status"
 
@@ -156,7 +163,7 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
         super().__init__(coordinator)
         self._appliance = coordinator.appliance
         self._attr_unique_id = f"{self._appliance.appliance_id}_bucket_status"
-        self._attr_name = "Bucket Status"
+        # No _attr_name: the translation key supplies it (see strings.json).
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
@@ -195,6 +202,7 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
 class FrigidaireCompressorEstimateSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
     """Expose the coordinator's opt-in compressor estimate."""
 
+    _attr_has_entity_name = True
     _attr_device_class = BinarySensorDeviceClass.RUNNING
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
