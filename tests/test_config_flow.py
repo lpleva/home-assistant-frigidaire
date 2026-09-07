@@ -4,7 +4,6 @@ import json
 from unittest.mock import patch
 
 import pytest
-
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
