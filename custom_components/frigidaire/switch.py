@@ -12,12 +12,11 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
-from frigidaire import Component, Detail, Setting
-
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .helpers import suggest_area
+from .vendor import frigidaire
+from .vendor.frigidaire import Component, Detail, Setting
 
 
 def _normalize(value):

@@ -11,8 +11,6 @@ from typing import Any
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-import frigidaire
-
 from .compressor import CompressorEstimator
 from .const import (
     CONF_COMPRESSOR_ESTIMATE,
@@ -21,6 +19,7 @@ from .const import (
     DEFAULT_COMPRESSOR_OFF_DELAY,
     DEFAULT_COOL_HYSTERESIS,
 )
+from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
 

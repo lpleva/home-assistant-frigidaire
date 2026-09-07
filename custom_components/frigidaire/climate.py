@@ -28,12 +28,11 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
-
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .diagnostics import filter_needs_attention, normalize_alerts
 from .helpers import suggest_area
+from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
 

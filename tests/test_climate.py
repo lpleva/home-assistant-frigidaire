@@ -2,13 +2,13 @@
 
 from datetime import timedelta
 
-import frigidaire
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from payloads import LEGACY_AC, TELICA_AC, with_reported
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from vendor import frigidaire
 
 OFF_AC = with_reported(LEGACY_AC, applianceState="OFF", mode="OFF")
 

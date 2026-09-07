@@ -8,11 +8,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-import frigidaire
-
 from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
+from .vendor import frigidaire
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.

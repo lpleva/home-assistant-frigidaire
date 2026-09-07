@@ -13,8 +13,6 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
-
 from .const import (
     CONF_BUCKET_STATUS_SENSOR,
     CONF_CHECK_FILTER_SENSOR,
@@ -24,6 +22,7 @@ from .const import (
 from .coordinator import FrigidaireApplianceCoordinator
 from .diagnostics import bucket_is_full, filter_needs_attention, normalize_alerts, normalize_filter_state
 from .helpers import suggest_area
+from .vendor import frigidaire
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:

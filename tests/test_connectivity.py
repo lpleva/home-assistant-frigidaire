@@ -3,12 +3,12 @@
 import copy
 from datetime import timedelta
 
-import frigidaire
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from payloads import LEGACY_AC
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
+from vendor import frigidaire
 
 
 def connectivity_id(hass: HomeAssistant) -> str:

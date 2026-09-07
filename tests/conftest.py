@@ -2,11 +2,17 @@
 
 Two kinds of tests live here:
 
-- Pure-helper tests (`test_auth_store.py`, `test_diagnostics.py`) import `auth_store` and
-  `diagnostics` directly; the sys.path insert below makes that work without importing the
+- Pure-helper tests (`test_auth_store.py`, `test_parsers.py`) import `auth_store` and
+  `parsers` directly; the sys.path insert below makes that work without importing the
   integration package (which needs Home Assistant).
 - Integration tests use the `hass` fixture from pytest-homeassistant-custom-component with
   `frigidaire.Frigidaire` replaced by `StubFrigidaire`, so nothing touches the network.
+
+The client library is vendored (see `custom_components/frigidaire/vendor/frigidaire/`), so
+tests import it as `from vendor import frigidaire`. The aliases registered below make that
+the very same module object the integration reaches through `from .vendor import frigidaire`
+— without them there would be two copies of the package, and `except FrigidaireException`
+inside the integration would not catch an exception a test raised from its own copy.
 """
 
 from __future__ import annotations
@@ -17,13 +23,18 @@ import sys
 from collections.abc import Awaitable, Callable, Generator
 from unittest.mock import patch
 
-import frigidaire
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_components", "frigidaire"))
+
+import vendor  # noqa: E402
+from vendor import frigidaire  # noqa: E402
+
+sys.modules.setdefault("custom_components.frigidaire.vendor", vendor)
+sys.modules.setdefault("custom_components.frigidaire.vendor.frigidaire", frigidaire)
 
 DOMAIN = "frigidaire"
 
@@ -91,7 +102,7 @@ def frigidaire_stub():
 
     The patch stays active across config-entry reloads, which construct a new client.
     """
-    with patch("frigidaire.Frigidaire") as client_cls:
+    with patch.object(frigidaire, "Frigidaire") as client_cls:
 
         def install(records: list[dict]) -> StubFrigidaire:
             stub = StubFrigidaire(records)

@@ -2,7 +2,6 @@
 
 from datetime import timedelta
 
-import frigidaire
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -10,6 +9,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 from payloads import DEHUMIDIFIER, LEGACY_AC, with_reported
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+from vendor import frigidaire
 
 DOMAIN = "frigidaire"
 

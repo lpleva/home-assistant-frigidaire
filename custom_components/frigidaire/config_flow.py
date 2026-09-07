@@ -12,8 +12,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-import frigidaire
-
 from .auth_store import AUTH_FILE, load_auth, save_auth
 from .const import (
     BINARY_SENSOR_OPTIONS,
@@ -26,6 +24,7 @@ from .const import (
     SENSOR_OPTIONS,
     SWITCH_OPTIONS,
 )
+from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
 

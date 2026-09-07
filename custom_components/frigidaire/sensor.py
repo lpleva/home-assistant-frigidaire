@@ -25,8 +25,6 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
-
 from .const import CONF_FILTER_RUNTIME_SENSOR, DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .diagnostics import (
@@ -38,6 +36,7 @@ from .diagnostics import (
     particulate_matter,
 )
 from .helpers import suggest_area
+from .vendor import frigidaire
 
 
 def _normalize(value):
