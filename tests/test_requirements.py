@@ -1,5 +1,6 @@
 """Guard the library boundary: the client is vendored, not installed from PyPI."""
 
+import importlib.util
 import json
 import re
 from pathlib import Path
@@ -32,7 +33,24 @@ def test_vendored_copy_is_present_and_records_its_upstream_version() -> None:
     assert re.search(r"\*\*Vendored from version:\*\* \d+\.\d+\.\d+", notes)
 
 
-def test_no_integration_module_imports_the_pypi_client() -> None:
-    """The PyPI package is the one with verify=False; every import must go through vendor/."""
-    for path in sorted((ROOT / "custom_components" / "frigidaire").glob("*.py")):
+def test_nothing_in_the_repo_imports_the_pypi_client() -> None:
+    """The PyPI package is the one with verify=False; every import must go through vendor/.
+
+    The tests are covered too: a test importing the PyPI copy would pass against a venv
+    that still has it installed and fail on a clean checkout, and worse, it would exercise
+    a different module object than the integration does.
+    """
+    sources = [
+        *(ROOT / "custom_components" / "frigidaire").glob("*.py"),
+        *(ROOT / "tests").glob("*.py"),
+    ]
+    for path in sorted(sources):
         assert not re.search(r"^(import frigidaire\b|from frigidaire import)", path.read_text(), re.M), path
+
+
+def test_the_pypi_client_is_not_installed_in_this_environment() -> None:
+    """Vendoring is only real if the suite passes without the wheel on sys.path."""
+    assert importlib.util.find_spec("frigidaire") is None, (
+        "the PyPI frigidaire package is installed; it disables TLS verification and can "
+        "shadow the vendored copy. Run: .venv/bin/pip uninstall -y frigidaire"
+    )
