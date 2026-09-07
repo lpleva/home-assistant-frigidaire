@@ -21,7 +21,9 @@ notice.
   the session wrapper rejects any attempt to reintroduce it, and the Gigya identity domain
   and the regional API base URL are validated against an allowlist of Electrolux and Gigya
   hosts before any credential is sent. Every request URL is re-checked at send time, which
-  also covers a tampered base URL restored from the caller's own cache.
+  also covers a tampered base URL restored from the caller's own cache, and redirects are
+  not followed — the allowlist checks the URL this client builds, and `requests` replays
+  the body of a 307/308, which for the login call is the password.
 
 ### High
 
@@ -33,9 +35,13 @@ notice.
   way to fix it from the UI.
 - **H3** — the config entry stores only the username. The session key is the credential the
   integration runs on; the password is asked for only when that key stops working. Entries
-  created by older versions have their plaintext password removed on the next start.
+  created by older versions are migrated to config-entry version 2, which drops the stored
+  password. Adding an account (or re-authenticating) always mints a fresh session rather
+  than reusing a cached one, so the password you type is actually checked.
 - **H4** — the session key is written atomically, mode 0600, into `.storage/` instead of
-  world-readable next to `configuration.yaml`. The old files are migrated once and deleted.
+  world-readable next to `configuration.yaml`. The old files are migrated once and deleted,
+  the staged copy the config flow writes is removed once the entry has its own, and
+  deleting the integration deletes the key with it.
 - **H5** — `set_humidity` switches the appliance to Dry only when the active mode ignores
   the setpoint, and refreshes once instead of three times. A unit in Continuous stays in
   Continuous when the humidity slider moves.
@@ -85,9 +91,30 @@ notice.
 - **L8** — `DELAYED_START` no longer falls through both power checks: `set_mode` leaves a
   pending start timer alone instead of cancelling it.
 
+### Also fixed, from the review of these fixes
+
+- Redirects are no longer followed on any request (see C1 above).
+- An unexpected setup failure is logged with its traceback before it becomes a retry, so a
+  bug in the integration cannot hide behind a silent retry loop.
+- Adding an account no longer validates the typed password against a cached session key,
+  which accepted a wrong password and could reuse another account's session.
+- `Smart` and `Fan` stay in the dehumidifier's mode list once the unit has been seen in
+  them, instead of vanishing as soon as you switch away.
+- The deprecated `CONCENTRATION_MICROGRAMS_PER_CUBIC_METER` constant (which logged a
+  warning naming this integration on every start) is replaced by `UnitOfDensity`.
+- A retried appliance command carries the newly minted session key rather than the dead one.
+- Response bodies are kept out of every client exception message, not just the two in the
+  login flow.
+- Diagnostics redact an appliance nickname that is really the appliance id.
+
 ### Testing
 
-133 tests before, 211 after. New coverage: the vendored client's TLS, host allowlist and
+133 tests before, 234 after. New coverage: the vendored client's TLS, host allowlist and
 response parsing; the reauth flow and the session-cap case that must not trigger it; the
 auth file's permissions and migration; the dehumidifier write paths; and the diagnostics
-platform's redaction.
+platform's redaction; the user config flow, which had no tests at all; and the entry
+migration and removal paths.
+
+The PyPI `frigidaire` wheel is uninstalled from the development venv and a test asserts it
+is not importable, so the suite proves the vendored copy is the one in use rather than
+quietly falling back to the package with `verify=False`.
