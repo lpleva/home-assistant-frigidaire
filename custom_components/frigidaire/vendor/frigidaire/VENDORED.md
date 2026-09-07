@@ -50,13 +50,20 @@ Each entry names the audit finding it answers.
   `Appliance.__init__` uses `.get()` for `applianceData`, `modelName`, and
   `applianceName`, raising `ValueError` only when `applianceId` is missing, and
   `get_appliances()` logs and skips a record it cannot parse instead of letting
-  one bad record kill the whole list.
+  one bad record kill the whole list. The auth flow's other blind subscripts go
+  the same way: `accessToken`, `gmid`, `ucid` and `id_token` go through
+  `_require_field`, and an empty `identity-providers` list is a named error
+  rather than an `IndexError`.
 - **M3 — module logger.** Every `logging.<level>()` call in `__init__.py` and
   `signature_generator.py` goes through `_LOGGER = logging.getLogger(__name__)`,
   so `logger:` config in Home Assistant can control this library's verbosity.
-- **M4 — no response bodies in exception messages.** The two `authenticate()`
-  failures report the response's key names and `errorCode` rather than the body,
-  which on those endpoints carries session tokens. `authenticate()` also raises
+- **M4 — no response bodies in exception messages, anywhere.** The two
+  `authenticate()` failures report the response's key names and `errorCode`
+  rather than the body, which on those endpoints carries session tokens.
+  `parse_response` does the same for every other request: the status, the
+  platform error code, and the body's byte length, but not the body. These
+  messages travel to the caller's log through `__cause__` chains, and an auth
+  endpoint's error body can carry a `regToken`. `authenticate()` also raises
   with `status_code=401` and `error_code="invalid_credentials"` when Gigya
   reports a login failure, so callers can classify it without string matching.
 - **M9 — the rate limiter no longer sleeps while holding its lock.**

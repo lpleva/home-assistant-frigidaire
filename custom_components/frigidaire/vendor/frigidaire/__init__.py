@@ -980,8 +980,12 @@ class Frigidaire:
                     error_code = body.get("error")
             except Exception:
                 pass
+            # The body is deliberately not in the message. It reaches the caller's log
+            # through __cause__ chains, and an auth endpoint's error body can carry a
+            # regToken. The status and the platform error code are what callers act on.
             raise FrigidaireException(
-                f"Request failed with status {response.status_code}: {response.content!r}",
+                f"Request failed with status {response.status_code} "
+                f"(error={error_code}, {len(response.content or b'')} bytes)",
                 status_code=response.status_code,
                 error_code=error_code,
             )
@@ -1000,8 +1004,13 @@ class Frigidaire:
             else:
                 response_dict = response.json()
         except Exception as e:
-            _LOGGER.error(e)
-            raise FrigidaireException(f"Received an unexpected response:\n{response.content!r}") from e
+            # Same reasoning: report the shape, not the body.
+            _LOGGER.debug("Could not decode a Frigidaire response: %s", e)
+            raise FrigidaireException(
+                f"Received an unexpected response: {type(e).__name__} decoding "
+                f"{len(response.content or b'')} bytes of "
+                f"{response.headers.get('Content-Type', 'an unknown content type')}"
+            ) from e
 
         return response_dict
 

@@ -371,3 +371,23 @@ def test_a_redirect_is_reported_as_a_failure_rather_than_followed() -> None:
     with pytest.raises(frigidaire.FrigidaireException) as excinfo:
         frigidaire.Frigidaire.parse_response(response)
     assert excinfo.value.status_code == 307
+
+
+def test_a_failed_response_does_not_carry_its_body_into_the_message() -> None:
+    """The message reaches Home Assistant's log through __cause__ chains."""
+    response = FakeResponse({"error": "cas_3403", "regToken": "SECRET-REG-TOKEN"}, status_code=403)
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        frigidaire.Frigidaire.parse_response(response)
+
+    assert "SECRET-REG-TOKEN" not in str(excinfo.value)
+    assert "403" in str(excinfo.value)
+    assert excinfo.value.error_code == "cas_3403"
+
+
+def test_an_undecodable_response_does_not_carry_its_body_either() -> None:
+    response = FakeResponse(content=b"<html>token=SECRET-REG-TOKEN</html>")
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        frigidaire.Frigidaire.parse_response(response)
+
+    assert "SECRET-REG-TOKEN" not in str(excinfo.value)
+    assert "unexpected response" in str(excinfo.value)
