@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .auth_store import load_auth, per_entry_auth_path, save_auth, shared_auth_path
+from .auth_store import per_entry_auth_path, save_auth, shared_auth_path
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -62,27 +62,29 @@ async def validate_input(
     """Validate credentials and return list of appliances.
 
     ``entry_id`` is passed when re-authenticating an existing entry: the fresh session key
-    then lands in that entry's own file, which is the one setup reads. It also means the
-    cached key is deliberately ignored, so the password the user just typed is actually
-    checked rather than shadowed by a session that outlived the password change.
+    then lands in that entry's own file, which is the one setup reads.
     """
 
     def setup(username: str, password: str) -> list[frigidaire.Appliance]:
-        if entry_id is None:
-            # Staged under .storage until the entry exists and gets its own file.
-            auth_path = shared_auth_path(hass.config.path())
-            session_key, regional_base_url = load_auth(auth_path)
-        else:
-            auth_path = per_entry_auth_path(hass.config.path(), entry_id)
-            session_key, regional_base_url = None, None
+        # Staged under .storage until the entry exists and gets its own file.
+        auth_path = (
+            shared_auth_path(hass.config.path())
+            if entry_id is None
+            else per_entry_auth_path(hass.config.path(), entry_id)
+        )
 
         try:
+            # No cached session key, ever, on either path. authenticate() returns early
+            # when the session it is handed still works, so reusing one here would mean
+            # the password the user just typed is never checked — a wrong password would
+            # be accepted, and adding a second account would silently reuse the first
+            # account's session. The cost is one freshly minted session per validation.
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
                 timeout=30,
-                session_key=session_key,
-                regional_base_url=regional_base_url,
+                session_key=None,
+                regional_base_url=None,
                 session_max_retries=1,
             )
             save_auth(auth_path, client.session_key, client.regional_base_url)
