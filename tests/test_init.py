@@ -157,3 +157,21 @@ async def test_entity_ids_and_names_carry_the_device(hass: HomeAssistant, setup_
     assert hass.states.get("binary_sensor.bedroom_ac_connectivity").attributes["friendly_name"] == (
         "Bedroom AC Connectivity"
     )
+
+
+async def test_an_unexpected_setup_failure_is_logged_with_its_traceback(
+    hass: HomeAssistant, frigidaire_stub, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Retrying forever with nothing in the log is how an integration bug stays invisible."""
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([LEGACY_AC])
+    stub.appliances_error = TypeError("something in here is broken")
+    entry = MockConfigEntry(domain=DOMAIN, data={"username": "user@example.com"}, unique_id="user@example.com")
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert "Unexpected error setting up Frigidaire" in caplog.text
+    assert "TypeError: something in here is broken" in caplog.text

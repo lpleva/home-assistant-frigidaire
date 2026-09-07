@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 
 from homeassistant.config_entries import ConfigEntry
@@ -14,6 +15,8 @@ from .const import DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
 from .helpers import is_auth_failure
 from .vendor import frigidaire
+
+_LOGGER = logging.getLogger(__name__)
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.
@@ -80,6 +83,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except Exception as err:  # noqa: BLE001 - a malformed cloud record must retry, not abort
             # Without this, an unexpected shape in the appliance list aborts setup outright
             # (no retry, just a traceback) and the appliances vanish until a restart.
+            # Log it first: ConfigEntryNotReady is reported at INFO with the traceback at
+            # DEBUG, so a genuine bug in here would otherwise retry forever leaving nothing
+            # in the log to debug from.
+            _LOGGER.exception("Unexpected error setting up Frigidaire; will retry")
             raise ConfigEntryNotReady(f"Unexpected Frigidaire response during setup: {err}") from err
 
     client, appliances = await hass.async_add_executor_job(
