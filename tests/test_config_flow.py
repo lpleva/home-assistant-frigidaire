@@ -1,9 +1,9 @@
-import pytest
-
 """The user config flow: credentials are checked, and only the username is kept."""
 
 import json
 from unittest.mock import patch
+
+import pytest
 
 from homeassistant.config_entries import SOURCE_USER
 from homeassistant.core import HomeAssistant
