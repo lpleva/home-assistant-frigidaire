@@ -1,3 +1,17 @@
+## About this fork
+
+This is Lukas Pleva's audited fork of [bm1549/home-assistant-frigidaire](https://github.com/bm1549/home-assistant-frigidaire), taken at upstream version 0.1.47; this fork is version 0.2.1. It exists because every integration that holds a login or can act on the house gets a line-by-line audit before it runs in his Home Assistant, and the fixes live here rather than upstream.
+
+**Why it was forked.** The integration holds a Frigidaire account login and runs inside Home Assistant with full privileges, and the library it depended on turned TLS certificate verification off for every request, including the one carrying the password.
+
+**What is different.** The `frigidaire` client library is vendored into the integration with TLS verification on, its hosts allowlisted, redirects refused and timeouts everywhere, so the login can no longer be intercepted or redirected. The password is no longer stored in the config entry (only the username; a dead session prompts re-authentication), the session token is kept owner-readable under `.storage`, response bodies stay out of exception messages and logs, a reauth flow was added, entity names follow current Home Assistant conventions, the dehumidifier write paths (target humidity, modes) were fixed and tested, and the test suite grew from 133 to 235. An independent review then added three fixes, including refusing HTTP redirects and never validating a typed password against a cached session. Fixes are not sent upstream; upstream is unchanged by this fork.
+
+**How it is kept current.** A weekly job merges upstream's new commits onto a branch, runs this fork's tests, reviews the diff, and only then pushes; a merge conflict or a failing test stops it. The fork is installed through HACS as a custom repository, so Home Assistant offers each new version as an update.
+
+**Where the detail is.** CHANGELOG.md record every change by audit finding.
+
+---
+
 # Home Assistant Custom Component for Frigidaire
 
 [![Latest Release](https://img.shields.io/github/release/bm1549/home-assistant-frigidaire/all.svg?style=for-the-badge)](https://github.com/bm1549/home-assistant-frigidaire/releases)
