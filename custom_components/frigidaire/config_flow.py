@@ -19,6 +19,7 @@ from .const import (
     CONF_COMPRESSOR_ESTIMATE,
     CONF_COMPRESSOR_OFF_DELAY,
     CONF_COOL_HYSTERESIS,
+    CONFIG_ENTRY_VERSION,
     DEFAULT_COMPRESSOR_OFF_DELAY,
     DEFAULT_COOL_HYSTERESIS,
     DOMAIN,
@@ -108,7 +109,7 @@ async def validate_input(
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for frigidaire."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
 
     def __init__(self) -> None:
         self._user_input: dict[str, Any] = {}

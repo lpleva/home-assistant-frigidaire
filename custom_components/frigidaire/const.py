@@ -1,6 +1,10 @@
 """Constants for the frigidaire integration."""
 
 DOMAIN = "frigidaire"
+
+# Bumped to 2 when the account password stopped being stored in the entry; see
+# async_migrate_entry. ConfigFlow.VERSION must match.
+CONFIG_ENTRY_VERSION = 2
 PLATFORMS = ["binary_sensor", "climate", "humidifier", "number", "sensor", "switch"]
 
 # Keys must match SwitchDescription.key values in switch.py

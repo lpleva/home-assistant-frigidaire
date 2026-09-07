@@ -2,6 +2,7 @@
 
 import json
 from datetime import timedelta
+from unittest.mock import patch
 
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -122,3 +123,31 @@ async def test_the_session_cap_does_not_prompt_for_a_password(hass: HomeAssistan
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert _reauth_flows(hass) == []
+
+
+async def test_the_password_migration_runs_once_and_bumps_the_entry_version(hass: HomeAssistant, setup_entry) -> None:
+    """A v1 entry is rewritten once by async_migrate_entry, not on every start."""
+    entry, _stub = await setup_entry([DEHUMIDIFIER])
+
+    assert entry.version == 2
+    assert "password" not in entry.data
+
+    with patch.object(hass.config_entries, "async_update_entry", wraps=hass.config_entries.async_update_entry) as up:
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not [call for call in up.call_args_list if "data" in call.kwargs]
+
+
+async def test_an_entry_from_a_newer_release_is_not_downgraded(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    frigidaire_stub([DEHUMIDIFIER])
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"username": "user@example.com"}, unique_id="user@example.com", version=3
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert entry.state is ConfigEntryState.MIGRATION_ERROR

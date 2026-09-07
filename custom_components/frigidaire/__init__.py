@@ -18,7 +18,7 @@ from .auth_store import (
     resolve_initial_auth_path,
     save_auth,
 )
-from .const import DOMAIN, PLATFORMS
+from .const import CONFIG_ENTRY_VERSION, DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
 from .helpers import is_auth_failure
 from .vendor import frigidaire
@@ -28,6 +28,29 @@ _LOGGER = logging.getLogger(__name__)
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.
 _AUTH_WRITE_LOCK = threading.Lock()
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate a config entry to the current version.
+
+    v1 -> v2: drop the account password. v1 kept it in ``entry.data``, which Home Assistant
+    persists in cleartext to .storage/core.config_entries and therefore into every backup.
+    The session key is the credential the integration runs on now, and async_step_reauth
+    asks for the password only if that key stops working.
+    """
+    if entry.version > CONFIG_ENTRY_VERSION:
+        # Written by a newer release of this integration; this one cannot read it.
+        return False
+
+    if entry.version == 1:
+        hass.config_entries.async_update_entry(
+            entry,
+            data={key: value for key, value in entry.data.items() if key != CONF_PASSWORD},
+            version=CONFIG_ENTRY_VERSION,
+        )
+        _LOGGER.debug("Removed the stored password from the Frigidaire config entry")
+
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -99,14 +122,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     client, appliances = await hass.async_add_executor_job(
         setup, entry.data[CONF_USERNAME], entry.data.get(CONF_PASSWORD)
     )
-
-    if CONF_PASSWORD in entry.data:
-        # Migration: older versions kept the account password in the config entry, which
-        # persists it in cleartext to .storage/core.config_entries and into every backup.
-        # The session key is the credential now; if it ever stops working, the reauth flow
-        # asks for the password again. Done before the update listener is registered, so
-        # this does not bounce the entry through a reload.
-        hass.config_entries.async_update_entry(entry, data={k: v for k, v in entry.data.items() if k != CONF_PASSWORD})
 
     # One request per poll cycle for the whole account: the account coordinator is the
     # only thing that polls, and it pushes each appliance's record to that appliance's
