@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
@@ -58,7 +58,10 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
         },
         "appliances": [
             {
-                "nickname": appliance.nickname,
+                # An appliance that reported no applianceName gets its id as a nickname
+                # (see the vendored Appliance), which would walk the id straight past
+                # TO_REDACT.
+                "nickname": REDACTED if appliance.nickname == appliance.appliance_id else appliance.nickname,
                 "appliance_type": appliance.appliance_type,
                 "destination": getattr(appliance.destination, "value", None),
                 "connection_state": coordinators[appliance.appliance_id].connection_state,

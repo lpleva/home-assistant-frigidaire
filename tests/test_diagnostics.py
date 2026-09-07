@@ -43,3 +43,14 @@ async def test_diagnostics_redact_identifiers_nested_in_reported_properties(hass
     result = await _diagnostics(hass, entry)
 
     assert result["appliances"][0]["reported"]["serialNumber"] == "**REDACTED**"
+
+
+async def test_diagnostics_do_not_leak_the_id_through_a_missing_nickname(hass: HomeAssistant, setup_entry) -> None:
+    """An appliance with no applianceName is nicknamed after its id by the client."""
+    record = json.loads(json.dumps(LEGACY_AC))
+    del record["applianceData"]["applianceName"]
+    entry, _stub = await setup_entry([record])
+
+    dumped = json.dumps(await _diagnostics(hass, entry))
+
+    assert "AC-LEGACY-1" not in dumped
