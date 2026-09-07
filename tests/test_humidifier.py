@@ -1,9 +1,13 @@
 """Humidifier entity behaviour for dehumidifiers."""
 
+from datetime import timedelta
+
 import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from payloads import DEHUMIDIFIER, with_reported
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from vendor import frigidaire
 
 
@@ -188,3 +192,28 @@ async def test_an_unknown_fan_mode_sends_nothing(hass: HomeAssistant, setup_entr
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert stub.commands == []
+
+
+async def test_smart_stays_offered_after_the_unit_leaves_it(hass: HomeAssistant, setup_entry) -> None:
+    """Otherwise selecting anything else removes Smart from the list and there is no way back."""
+    _entry, stub = await setup_entry([with_reported(DEHUMIDIFIER, mode="SMART")])
+    assert "smart" in hass.states.get(humidifier_id(hass)).attributes["available_modes"]
+
+    stub.records["DH-1"]["properties"]["reported"]["mode"] = "DRY"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    state = hass.states.get(humidifier_id(hass))
+    assert state.attributes["mode"] == "normal"
+    assert "smart" in state.attributes["available_modes"]
+
+
+async def test_a_model_that_never_reports_smart_is_not_offered_it(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([DEHUMIDIFIER])
+
+    assert hass.states.get(humidifier_id(hass)).attributes["available_modes"] == [
+        "normal",
+        "boost",
+        "auto",
+        "sleep",
+    ]

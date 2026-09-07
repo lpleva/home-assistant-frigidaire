@@ -76,6 +76,10 @@ HA_TO_FRIGIDAIRE_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_MODE.items()}
 # Every model has these four.
 BASE_MODES = [MODE_NORMAL, MODE_BOOST, MODE_AUTO, MODE_SLEEP]
 
+# Only some models have these, and the API does not say which, so they are offered once an
+# appliance has been seen in one. Listed rather than appended so the order stays stable.
+EXTRA_MODES = [MODE_SMART, MODE_FAN]
+
 # Modes in which the appliance works towards the target humidity. CONTINUOUS runs
 # regardless of the setpoint and FANONLY does not dehumidify at all, so those are the
 # only two set_humidity has to switch away from.
@@ -126,6 +130,8 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
 
         # Warned-about modes, so an unmapped value does not log on every poll.
         self._warned_modes: set = set()
+        # Extra modes this appliance has been seen in. Sticky: see available_modes.
+        self._seen_modes: set[str] = set()
 
     @property
     def _details(self) -> dict:
@@ -158,14 +164,14 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         """Modes offered in the UI.
 
         Smart and fan-only exist on some models and not others, so they are offered once
-        the appliance reports being in one. Offering a mode the unit silently ignores is
-        worse than not offering it.
+        the appliance has been seen in one. Offering a mode the unit silently ignores is
+        worse than not offering it — but the memory is sticky on purpose: dropping a mode
+        again as soon as the user leaves it would take away the way back.
         """
-        modes = list(BASE_MODES)
         current = FRIGIDAIRE_TO_HA_MODE.get(normalize_enum_value(self._details.get(frigidaire.Detail.MODE)))
-        if current is not None and current not in modes:
-            modes.append(current)
-        return modes
+        if current is not None and current not in BASE_MODES:
+            self._seen_modes.add(current)
+        return BASE_MODES + [mode for mode in EXTRA_MODES if mode in self._seen_modes]
 
     @property
     def mode(self):
