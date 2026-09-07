@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import threading
 from typing import Any
 from unittest.mock import patch
 
@@ -333,11 +334,23 @@ def test_authenticating_without_a_password_asks_for_reauth_instead_of_logging_in
 
 
 def test_rate_limiter_does_not_hold_its_lock_while_sleeping() -> None:
-    limiter = rate_limit.RateLimiter(min_interval=0.05, jitter=0)
-    limiter.wait()  # arms the next slot
-    limiter.wait()  # must sleep for it
-    assert limiter._lock.acquire(blocking=False)
-    limiter._lock.release()
+    """Probed from another thread mid-sleep: checking after wait() returns proves nothing."""
+    limiter = rate_limit.RateLimiter(min_interval=0.2, jitter=0)
+    limiter.wait()  # arms the next slot 0.2s out
+
+    lock_was_free = threading.Event()
+
+    def probe() -> None:
+        if limiter._lock.acquire(blocking=False):
+            limiter._lock.release()
+            lock_was_free.set()
+
+    probe_thread = threading.Timer(0.05, probe)
+    probe_thread.start()
+    limiter.wait()  # sleeps for the rest of the interval
+    probe_thread.join()
+
+    assert lock_was_free.is_set(), "the limiter held its lock for the whole sleep"
 
 
 def test_the_shared_limiter_is_not_keyed_by_the_account_email() -> None:
