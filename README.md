@@ -1,6 +1,6 @@
 ## About this fork
 
-This is Lukas Pleva's audited fork of [bm1549/home-assistant-frigidaire](https://github.com/bm1549/home-assistant-frigidaire), taken at upstream version 0.1.47; this fork is version 0.2.1. It exists because every integration that holds a login or can act on the house gets a line-by-line audit before it runs in his Home Assistant, and the fixes live here rather than upstream.
+This is an audited fork of [bm1549/home-assistant-frigidaire](https://github.com/bm1549/home-assistant-frigidaire), taken at upstream version 0.1.47; this fork is version 0.2.1. It exists because, in the Home Assistant install it serves, every integration that holds a login or can act on the home gets a line-by-line audit before it runs, and the fixes live here rather than upstream.
 
 **Why it was forked.** The integration holds a Frigidaire account login and runs inside Home Assistant with full privileges, and the library it depended on turned TLS certificate verification off for every request, including the one carrying the password.
 
