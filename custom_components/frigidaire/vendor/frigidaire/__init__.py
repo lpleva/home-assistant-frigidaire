@@ -665,6 +665,10 @@ class Frigidaire:
         )
         # These three values come out of a cloud response and decide where the account
         # password is sent, so they are validated before they are used, not after.
+        if not identity_providers_response or not isinstance(identity_providers_response[0], dict):
+            raise FrigidaireException(
+                f"Failed to authenticate: no identity provider returned for country {self.country_code}"
+            )
         provider = identity_providers_response[0]
         identity_domain = _validate_identity_domain(provider.get("domain"))
         identity_api_key = provider.get("apiKey")
