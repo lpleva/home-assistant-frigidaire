@@ -1,153 +1,47 @@
-"""Tests for Frigidaire diagnostic parsing."""
+"""The diagnostics platform: enough detail to debug with, no account identifiers."""
 
-import math
+import json
 
-import pytest
-from diagnostics import (
-    bucket_is_full,
-    filter_needs_attention,
-    filter_runtime_seconds,
-    humidity_percent,
-    link_quality,
-    network_rssi,
-    normalize_alerts,
-    normalize_filter_state,
-    particulate_matter,
-)
+from homeassistant.core import HomeAssistant
+from payloads import DEHUMIDIFIER, LEGACY_AC
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.frigidaire.diagnostics import async_get_config_entry_diagnostics
 
 
-@pytest.mark.parametrize(
-    ("state", "expected"),
-    [
-        (None, None),
-        ("good", False),
-        ("CLEAN", True),
-        ("CHANGE", True),
-        ("BUY", True),
-    ],
-)
-def test_filter_needs_attention(state, expected):
-    assert filter_needs_attention(state) is expected
+async def _diagnostics(hass: HomeAssistant, entry: MockConfigEntry) -> dict:
+    return await async_get_config_entry_diagnostics(hass, entry)
 
 
-def test_normalize_filter_state():
-    assert normalize_filter_state("clean") == "CLEAN"
+async def test_diagnostics_describe_every_appliance(hass: HomeAssistant, setup_entry) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+
+    result = await _diagnostics(hass, entry)
+
+    assert [a["nickname"] for a in result["appliances"]] == ["Bedroom AC", "Basement Dehumidifier"]
+    assert [a["destination"] for a in result["appliances"]] == ["AC", "DH"]
+    assert result["appliances"][0]["connection_state"] == "CONNECTED"
+    assert result["appliances"][0]["reported"]["mode"] == "COOL"
+    assert result["account"]["last_update_success"] is True
 
 
-@pytest.mark.parametrize(
-    ("alerts", "expected"),
-    [
-        (None, None),
-        ([], []),
-        ("communication_fault", ["COMMUNICATION_FAULT"]),
-        (["BUS_HIGH_VOLTAGE", {"code": "communication_fault"}], ["BUS_HIGH_VOLTAGE", "COMMUNICATION_FAULT"]),
-        ([{"message": "missing code"}], []),
-    ],
-)
-def test_normalize_alerts(alerts, expected):
-    assert normalize_alerts(alerts) == expected
+async def test_diagnostics_redact_the_account_and_the_hardware_ids(hass: HomeAssistant, setup_entry) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC])
+
+    dumped = json.dumps(await _diagnostics(hass, entry))
+
+    assert "user@example.com" not in dumped
+    assert "AC-LEGACY-1" not in dumped
+    assert "secret" not in dumped
 
 
-@pytest.mark.parametrize(
-    ("seconds", "expected"),
-    [
-        (482400, 482400),
-        ("3600", 3600),
-        (0, 0),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (math.inf, None),
-    ],
-)
-def test_filter_runtime_seconds(seconds, expected):
-    assert filter_runtime_seconds(seconds) == expected
+async def test_diagnostics_redact_identifiers_nested_in_reported_properties(
+    hass: HomeAssistant, setup_entry
+) -> None:
+    record = json.loads(json.dumps(LEGACY_AC))
+    record["properties"]["reported"]["serialNumber"] = "SERIAL-12345"
+    entry, _stub = await setup_entry([record])
 
+    result = await _diagnostics(hass, entry)
 
-@pytest.mark.parametrize(
-    ("alerts", "water_bucket_level", "water_tank_full", "expected"),
-    [
-        (None, None, None, None),
-        ([], None, None, False),
-        (["BUCKET_FULL"], None, None, True),
-        (["FILTER"], 0, None, False),
-        (None, 1, None, True),
-        (None, 0, "NO", False),
-        (None, None, "yes", True),
-        (None, None, True, True),
-        (None, None, False, False),
-    ],
-)
-def test_bucket_is_full(alerts, water_bucket_level, water_tank_full, expected):
-    assert bucket_is_full(alerts, water_bucket_level, water_tank_full) is expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (86, 86),
-        ("48.5", 48.5),
-        (0, 0),
-        (100, 100),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (101, None),
-        (math.inf, None),
-        (math.nan, None),
-    ],
-)
-def test_humidity_percent(value, expected):
-    assert humidity_percent(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (4, 4),
-        ("12", 12),
-        (0, 0),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (math.inf, None),
-        (math.nan, None),
-    ],
-)
-def test_particulate_matter(value, expected):
-    assert particulate_matter(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, -41),
-        ({"rssi": "-67"}, -67),
-        # Positive dBm is not a real reading, so treat it as a placeholder.
-        ({"rssi": 41}, None),
-        ({"rssi": 0}, None),
-        ({"linkQualityIndicator": "EXCELLENT"}, None),
-        ({}, None),
-        (None, None),
-        # Appliances that report no Wi-Fi telemetry can send a scalar or a list here.
-        ("EXCELLENT", None),
-        ([], None),
-    ],
-)
-def test_network_rssi(value, expected):
-    assert network_rssi(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, "EXCELLENT"),
-        ({"linkQualityIndicator": "poor"}, "POOR"),
-        ({"rssi": -41}, None),
-        ({}, None),
-        (None, None),
-        ("EXCELLENT", None),
-    ],
-)
-def test_link_quality(value, expected):
-    assert link_quality(value) == expected
+    assert result["appliances"][0]["reported"]["serialNumber"] == "**REDACTED**"

@@ -20,8 +20,8 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import bucket_is_full, filter_needs_attention, normalize_alerts, normalize_filter_state
 from .helpers import suggest_area
+from .parsers import bucket_is_full, filter_needs_attention, normalize_alerts, normalize_filter_state
 from .vendor import frigidaire
 
 

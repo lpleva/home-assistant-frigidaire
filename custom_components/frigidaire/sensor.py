@@ -27,7 +27,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_FILTER_RUNTIME_SENSOR, DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import (
+from .helpers import normalize_enum_value, suggest_area
+from .parsers import (
     AIR_FILTER_LIFETIME_KEY,
     filter_runtime_seconds,
     humidity_percent,
@@ -35,7 +36,6 @@ from .diagnostics import (
     network_rssi,
     particulate_matter,
 )
-from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 
 

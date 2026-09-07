@@ -25,8 +25,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import bucket_is_full, filter_needs_attention, normalize_alerts
 from .helpers import normalize_enum_value, suggest_area
+from .parsers import bucket_is_full, filter_needs_attention, normalize_alerts
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
