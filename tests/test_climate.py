@@ -1,5 +1,6 @@
 """Climate entity behaviour for air conditioners."""
 
+import copy
 from datetime import timedelta
 
 import pytest
@@ -126,3 +127,28 @@ async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant
     await setup_entry([with_reported(LEGACY_AC, mode="DRY")])
 
     assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
+
+
+async def test_a_missing_temperature_representation_does_not_break_the_entity(
+    hass: HomeAssistant, setup_entry
+) -> None:
+    """temperature_unit is read on every state write, so it must never raise."""
+    record = copy.deepcopy(LEGACY_AC)
+    del record["properties"]["reported"]["temperatureRepresentation"]
+    await setup_entry([record])
+
+    state = hass.states.get(climate_id(hass))
+    assert state.state == "cool"
+    # Falls back to Fahrenheit, which is what the reported values are in.
+    assert state.attributes["temperature"] == 72
+    assert state.attributes["current_temperature"] == 75
+
+
+async def test_an_unmapped_hvac_mode_warns_once(
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="SOMETHING_NEW")])
+
+    hass.states.get(climate_id(hass))
+    hass.states.get(climate_id(hass))
+    assert caplog.text.count("Unsupported HVAC mode") == 1

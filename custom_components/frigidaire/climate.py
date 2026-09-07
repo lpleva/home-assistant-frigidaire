@@ -31,18 +31,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .diagnostics import filter_needs_attention, normalize_alerts
-from .helpers import suggest_area
+from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _normalize_enum_value(value):
-    """Normalize API values to uppercase for enum comparison."""
-    if isinstance(value, str):
-        return value.upper()
-    return value
-
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up frigidaire from a config entry."""
@@ -142,6 +134,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         super().__init__(coordinator)
         self._client: frigidaire.Frigidaire = coordinator.client
         self._appliance: frigidaire.Appliance = coordinator.appliance
+
+        # Modes already warned about, so an unmapped value does not log on every poll.
+        self._warned_modes: set = set()
 
         # Optimistic state — holds values for OPTIMISTIC_WINDOW seconds after a command
         self._optimistic_until: float = 0
@@ -248,10 +243,15 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
 
     @property
     def temperature_unit(self):
-        """Return the unit of measurement which this thermostat uses."""
-        unit = _normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
+        """Return the unit of measurement which this thermostat uses.
 
-        return FRIGIDAIRE_TO_HA_UNIT[unit]
+        Falls back to Fahrenheit when the appliance omits temperatureRepresentation:
+        Home Assistant reads this property on every state write, so a KeyError here
+        would freeze the entity rather than merely mislabel one reading.
+        """
+        unit = normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
+
+        return FRIGIDAIRE_TO_HA_UNIT.get(unit, UnitOfTemperature.FAHRENHEIT)
 
     @property
     def target_temperature(self):
@@ -268,13 +268,17 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Return current operation i.e. heat, cool, idle."""
         if self._is_optimistic() and self._optimistic_hvac_mode is not None:
             return self._optimistic_hvac_mode
-        appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        appliance_state = normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
         if appliance_state == frigidaire.ApplianceState.OFF:
             return HVACMode.OFF
-        frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+        frigidaire_mode = normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
 
         if frigidaire_mode not in FRIGIDAIRE_TO_HA_MODE:
-            _LOGGER.warning("Unsupported HVAC mode '%s' reported by device.", frigidaire_mode)
+            # Once per distinct value: this property is read on every poll and on every
+            # state read, so an unmapped mode would otherwise fill the log.
+            if frigidaire_mode not in self._warned_modes:
+                self._warned_modes.add(frigidaire_mode)
+                _LOGGER.warning("Unsupported HVAC mode '%s' reported by device.", frigidaire_mode)
             return None
 
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
@@ -285,7 +289,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         mode = self.hvac_mode
         if mode == HVACMode.OFF:
             return HVACAction.OFF
-        appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        appliance_state = normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
         if appliance_state != frigidaire.ApplianceState.RUNNING:
             return HVACAction.IDLE
 
@@ -295,7 +299,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         # hvac_mode deliberately stays on the requested mode — that is the user's selection
         # and must not flap as the compressor cycles.
         mode_state = FRIGIDAIRE_MODE_STATE_TO_HA_ACTION.get(
-            _normalize_enum_value(self._details.get(frigidaire.Detail.MODE_STATE))
+            normalize_enum_value(self._details.get(frigidaire.Detail.MODE_STATE))
         )
         if mode_state is not None:
             return mode_state
@@ -325,7 +329,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Return the fan setting."""
         if self._is_optimistic() and self._optimistic_fan_mode is not None:
             return self._optimistic_fan_mode
-        fan_speed = _normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
+        fan_speed = normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
 
         if not fan_speed:
             return None
@@ -339,7 +343,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             return None
         if self._is_optimistic() and self._optimistic_swing_mode is not None:
             return self._optimistic_swing_mode
-        swing = _normalize_enum_value(self._details.get(frigidaire.Detail.VERTICAL_SWING))
+        swing = normalize_enum_value(self._details.get(frigidaire.Detail.VERTICAL_SWING))
         if swing == frigidaire.VerticalSwing.ON:
             return SWING_VERTICAL
         return SWING_OFF
@@ -364,7 +368,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
     def preset_mode(self) -> str | None:
         if self._is_optimistic() and self._optimistic_preset_mode is not None:
             return self._optimistic_preset_mode
-        sleep = _normalize_enum_value(self._details.get(frigidaire.Detail.SLEEP_MODE))
+        sleep = normalize_enum_value(self._details.get(frigidaire.Detail.SLEEP_MODE))
         if sleep == frigidaire.SleepMode.ON:
             return PRESET_SLEEP
         return PRESET_NONE
@@ -440,8 +444,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         else:
             if hvac_mode not in HA_TO_FRIGIDAIRE_HVAC_MODE:
                 return
-            appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
-            frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+            appliance_state = normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+            frigidaire_mode = normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
             was_off = appliance_state == frigidaire.ApplianceState.OFF or frigidaire_mode == frigidaire.Mode.OFF
             _LOGGER.debug(
                 "Turn-on requested; cloud reports appliance_state=%s mode=%s", appliance_state, frigidaire_mode

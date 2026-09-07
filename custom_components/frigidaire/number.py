@@ -14,14 +14,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import suggest_area
+from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
-
-
-def _normalize(value):
-    if isinstance(value, str):
-        return value.upper()
-    return value
 
 
 STEP_SECONDS = 1800  # 30 minutes
@@ -83,7 +77,7 @@ class FrigidaireTimerNumber(CoordinatorEntity[FrigidaireApplianceCoordinator], N
     def native_value(self) -> float:
         if time.monotonic() < self._optimistic_until:
             return self._optimistic_value or 0
-        appliance_state = _normalize(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        appliance_state = normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
         if self._timer_type == "on":
             active = appliance_state in (frigidaire.ApplianceState.OFF, frigidaire.ApplianceState.DELAYED_START)
             detail_key = frigidaire.Detail.START_TIME

@@ -14,15 +14,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import suggest_area
+from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 from .vendor.frigidaire import Component, Detail, Setting
-
-
-def _normalize(value):
-    if isinstance(value, str):
-        return value.upper()
-    return value
 
 
 @dataclass
@@ -80,10 +74,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     coordinators: dict[str, FrigidaireApplianceCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
     appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
     # options is keyed by appliance_id -> {switch_key: bool}
+    # No early return on empty options: the comprehension below already yields nothing,
+    # and an unconditional switch added later would have been skipped silently.
     options: dict[str, dict[str, bool]] = entry.options
-
-    if not options:
-        return
 
     entities = [
         FrigidaireSwitch(
@@ -136,7 +129,7 @@ class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], Switch
             if isinstance(raw, bool):
                 return raw == on_val
             return str(raw).upper() == "TRUE" if on_val else str(raw).upper() == "FALSE"
-        return _normalize(raw) == str(on_val).upper()
+        return normalize_enum_value(raw) == str(on_val).upper()
 
     def turn_on(self, **kwargs: Any) -> None:
         self._client.execute_action(self._appliance, self._desc.make_action(True))

@@ -35,14 +35,8 @@ from .diagnostics import (
     network_rssi,
     particulate_matter,
 )
-from .helpers import suggest_area
+from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
-
-
-def _normalize(value):
-    if isinstance(value, str):
-        return value.upper()
-    return value
 
 
 FRIGIDAIRE_TO_HA_UNIT = {
@@ -193,7 +187,8 @@ class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
         from whichever ambient value is present so the unit always matches
         native_value.
         """
-        unit = FRIGIDAIRE_TO_HA_UNIT.get(_normalize(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION)))
+        reported = normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
+        unit = FRIGIDAIRE_TO_HA_UNIT.get(reported)
         if unit is not None:
             return unit
         if (
