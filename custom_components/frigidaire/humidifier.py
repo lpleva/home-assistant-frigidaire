@@ -26,18 +26,10 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .diagnostics import bucket_is_full, filter_needs_attention, normalize_alerts
-from .helpers import suggest_area
+from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _normalize_enum_value(value):
-    """Normalize API values to uppercase for enum comparison."""
-    if isinstance(value, str):
-        return value.upper()
-    return value
-
 
 FAN_LOW = "low"
 FAN_MEDIUM = "medium"
@@ -63,20 +55,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
 
 
+# Smart and fan-only get their own Home Assistant modes rather than folding into
+# "auto"/"normal": collapsing them made the mapping lossy, so selecting the displayed mode
+# sent a different one back and silently switched the appliance out of Smart.
+MODE_FAN = "fan"
+MODE_SMART = "smart"
+
 FRIGIDAIRE_TO_HA_MODE = {
     frigidaire.Mode.DRY: MODE_NORMAL,
     frigidaire.Mode.CONTINUOUS: MODE_BOOST,
     frigidaire.Mode.QUIET: MODE_SLEEP,
     frigidaire.Mode.AUTO: MODE_AUTO,
-    frigidaire.Mode.SMART: MODE_AUTO,
+    frigidaire.Mode.SMART: MODE_SMART,
+    frigidaire.Mode.FAN: MODE_FAN,
 }
 
-HA_TO_FRIGIDAIRE_MODE = {
-    MODE_NORMAL: frigidaire.Mode.DRY,
-    MODE_BOOST: frigidaire.Mode.CONTINUOUS,
-    MODE_SLEEP: frigidaire.Mode.QUIET,
-    MODE_AUTO: frigidaire.Mode.AUTO,
-}
+# Bijective by construction, so a mode always round-trips.
+HA_TO_FRIGIDAIRE_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_MODE.items()}
+
+# Every model has these four.
+BASE_MODES = [MODE_NORMAL, MODE_BOOST, MODE_AUTO, MODE_SLEEP]
+
+# Modes in which the appliance works towards the target humidity. CONTINUOUS runs
+# regardless of the setpoint and FANONLY does not dehumidify at all, so those are the
+# only two set_humidity has to switch away from.
+SETPOINT_MODES = frozenset(
+    {frigidaire.Mode.DRY, frigidaire.Mode.AUTO, frigidaire.Mode.SMART, frigidaire.Mode.QUIET}
+)
 
 FRIGIDAIRE_TO_HA_FAN_MODE = {
     frigidaire.FanSpeed.LOW: FAN_LOW,
@@ -113,17 +118,12 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
 
         self._attr_device_class = HumidifierDeviceClass.DEHUMIDIFIER
 
-        # self._attr_fan_modes = [
-        #     FAN_LOW,
-        #     FAN_HIGH,
-        # ]
+        # Fan speed is exposed through the frigidaire.set_fan_mode service and the
+        # fan_mode state attribute rather than a feature flag, because the humidifier
+        # entity has no standard fan-mode feature.
 
-        self._attr_available_modes = [
-            MODE_NORMAL,
-            MODE_BOOST,
-            MODE_AUTO,
-            MODE_SLEEP,
-        ]
+        # Warned-about modes, so an unmapped value does not log on every poll.
+        self._warned_modes: set = set()
 
     @property
     def _details(self) -> dict:
@@ -142,7 +142,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
     @property
     def is_on(self):
         return (
-            _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+            normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
             == frigidaire.ApplianceState.RUNNING
         )
 
@@ -152,15 +152,34 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         return self._details.get(frigidaire.Detail.TARGET_HUMIDITY)
 
     @property
+    def available_modes(self) -> list[str]:
+        """Modes offered in the UI.
+
+        Smart and fan-only exist on some models and not others, so they are offered once
+        the appliance reports being in one. Offering a mode the unit silently ignores is
+        worse than not offering it.
+        """
+        modes = list(BASE_MODES)
+        current = FRIGIDAIRE_TO_HA_MODE.get(normalize_enum_value(self._details.get(frigidaire.Detail.MODE)))
+        if current is not None and current not in modes:
+            modes.append(current)
+        return modes
+
+    @property
     def mode(self):
         """Return current operation i.e. dry, continuous."""
-        frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+        frigidaire_mode = normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
 
         if frigidaire_mode == frigidaire.Mode.OFF:
             return MODE_NORMAL
 
         if frigidaire_mode not in FRIGIDAIRE_TO_HA_MODE:
-            _LOGGER.warning("Unsupported dehumidifier mode '%s' reported by device.", frigidaire_mode)
+            # Once per distinct value: this is a state property, so Home Assistant
+            # evaluates it on every poll and an unmapped mode would otherwise log
+            # 2,880 identical warnings a day.
+            if frigidaire_mode not in self._warned_modes:
+                self._warned_modes.add(frigidaire_mode)
+                _LOGGER.warning("Unsupported dehumidifier mode '%s' reported by device.", frigidaire_mode)
             return None
 
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
@@ -168,7 +187,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Add extra state attributes specific to Frigidaire dehumidifiers"""
-        fan_speed = _normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
+        fan_speed = normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
 
         attrib = {
             "current_humidity": self._details.get(frigidaire.Detail.SENSOR_HUMIDITY),
@@ -212,15 +231,23 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.OFF))
         self.schedule_update_ha_state(force_refresh=True)
 
-    def set_humidity(self, humidity: int):
+    def set_humidity(self, humidity: int) -> None:
         """Set new target humidity."""
         if humidity is None:
             return
-        # Only supports 5% steps
+        # The appliance only accepts 5% steps. Home Assistant has already range-checked
+        # against min_humidity/max_humidity, so rounding stays inside 35-85.
         humidity = 5 * round(humidity / 5)
-        # We have to be in dry mode to set a target humidity
-        self.set_mode(MODE_NORMAL)
+
+        current_mode = normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+        if current_mode not in SETPOINT_MODES:
+            # Switch to Dry only when the active mode would ignore the setpoint. Doing it
+            # unconditionally dropped a unit out of Continuous every time the humidity
+            # slider moved, which is not what anyone asked for.
+            self._client.execute_action(self._appliance, frigidaire.Action.set_mode(frigidaire.Mode.DRY))
+
         self._client.execute_action(self._appliance, frigidaire.Action.set_humidity(humidity))
+        # One refresh for the whole operation: each one is a full account fetch.
         self.schedule_update_ha_state(force_refresh=True)
 
     def set_fan_mode(self, fan_mode):
@@ -233,16 +260,20 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         self._client.execute_action(self._appliance, action)
         self.schedule_update_ha_state(force_refresh=True)
 
-    def set_mode(self, mode):
+    def set_mode(self, mode: str) -> None:
         """Set new target operation mode."""
 
         # Guard against unexpected modes
         if mode not in HA_TO_FRIGIDAIRE_MODE:
             return
 
-        # Turn on if not currently on.
-        if _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE)) == frigidaire.ApplianceState.OFF:
-            self.turn_on()
+        state = normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        # Only OFF gets a power command. DELAYED_START is excluded on purpose: the unit is
+        # already scheduled to start, and powering it on now would cancel that timer. The
+        # power command is sent directly rather than through turn_on(), which would queue
+        # a second full refresh of its own.
+        if state == frigidaire.ApplianceState.OFF:
+            self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
 
         self._client.execute_action(self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_MODE[mode]))
         self.schedule_update_ha_state(force_refresh=True)
