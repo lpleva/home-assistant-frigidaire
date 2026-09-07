@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .auth_store import load_auth, save_auth, shared_auth_path
+from .auth_store import load_auth, per_entry_auth_path, save_auth, shared_auth_path
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -23,6 +25,7 @@ from .const import (
     SENSOR_OPTIONS,
     SWITCH_OPTIONS,
 )
+from .helpers import is_auth_failure
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,32 +56,46 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance | None = None)
     return vol.Schema(fields)
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> list[frigidaire.Appliance]:
-    """Validate credentials and return list of appliances."""
+async def validate_input(
+    hass: HomeAssistant, data: dict[str, Any], entry_id: str | None = None
+) -> list[frigidaire.Appliance]:
+    """Validate credentials and return list of appliances.
+
+    ``entry_id`` is passed when re-authenticating an existing entry: the fresh session key
+    then lands in that entry's own file, which is the one setup reads. It also means the
+    cached key is deliberately ignored, so the password the user just typed is actually
+    checked rather than shadowed by a session that outlived the password change.
+    """
 
     def setup(username: str, password: str) -> list[frigidaire.Appliance]:
-        # Staged under .storage until the entry exists and gets its own file.
-        auth_path = shared_auth_path(hass.config.path())
+        if entry_id is None:
+            # Staged under .storage until the entry exists and gets its own file.
+            auth_path = shared_auth_path(hass.config.path())
+            session_key, regional_base_url = load_auth(auth_path)
+        else:
+            auth_path = per_entry_auth_path(hass.config.path(), entry_id)
+            session_key, regional_base_url = None, None
 
         try:
-            session_key, regional_base_url = load_auth(auth_path)
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
-                timeout=60,
+                timeout=30,
                 session_key=session_key,
                 regional_base_url=regional_base_url,
+                session_max_retries=1,
             )
             save_auth(auth_path, client.session_key, client.regional_base_url)
 
             return client.get_appliances()
         except frigidaire.FrigidaireException as err:
-            if "Failed to authenticate" in str(err):
+            # Structural first; the library's wording is not a stable contract.
+            if is_auth_failure(err):
                 raise InvalidAuth from err
 
             raise CannotConnect from err
 
-    appliances = await hass.async_add_executor_job(setup, data["username"], data["password"])
+    appliances = await hass.async_add_executor_job(setup, data[CONF_USERNAME], data[CONF_PASSWORD])
 
     if len(appliances) == 0:
         raise NoAppliances
@@ -96,6 +113,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._appliances: list[frigidaire.Appliance] = []
         self._pending_appliances: list[frigidaire.Appliance] = []
         self._options: dict[str, dict[str, Any]] = {}
+        self._reauth_username: str = ""
 
     @staticmethod
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
@@ -116,8 +134,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "invalid_auth"
         except NoAppliances:
             errors["base"] = "no_appliances"
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception")
+        except (KeyError, TypeError, ValueError) as err:
+            # A malformed appliance record from the cloud. The message is safe to log; the
+            # exception chain is not, since a wrapped response body can carry a token.
+            _LOGGER.error("Could not parse the Frigidaire appliance list: %s", err)
+            errors["base"] = "unknown"
+        except Exception:  # noqa: BLE001 - last resort, must not leave the flow hanging
+            _LOGGER.exception("Unexpected error validating Frigidaire credentials")
             errors["base"] = "unknown"
         else:
             await self.async_set_unique_id(user_input["username"].lower())
@@ -131,8 +154,49 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _async_next_device_step(self) -> FlowResult:
         if not self._pending_appliances:
-            return self.async_create_entry(title="Frigidaire", data=self._user_input, options=self._options)
+            # Only the username is persisted. validate_input has already stored the
+            # session key, which is the credential the integration actually runs on; the
+            # password would otherwise sit in cleartext in .storage/core.config_entries
+            # and in every backup. If the session ever dies, async_step_reauth asks again.
+            return self.async_create_entry(
+                title="Frigidaire",
+                data={CONF_USERNAME: self._user_input[CONF_USERNAME]},
+                options=self._options,
+            )
         return await self.async_step_device()
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Start reauth when the stored session (and password, if any) stops working."""
+        self._reauth_username = entry_data[CONF_USERNAME]
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Ask for the current password and swap in a fresh session key."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            candidate = {CONF_USERNAME: self._reauth_username, CONF_PASSWORD: user_input[CONF_PASSWORD]}
+            try:
+                await validate_input(self.hass, candidate, entry_id=entry.entry_id)
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except (CannotConnect, NoAppliances):
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001 - last resort, must not leave the flow hanging
+                _LOGGER.exception("Unexpected error re-authenticating with Frigidaire")
+                errors["base"] = "unknown"
+            else:
+                # data, not data_updates: this also drops the plaintext password an
+                # older version of the integration left in the entry.
+                return self.async_update_reload_and_abort(entry, data={CONF_USERNAME: self._reauth_username})
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+            description_placeholders={"username": self._reauth_username},
+            errors=errors,
+        )
 
     async def async_step_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show switch checkboxes for the current appliance in the queue."""
@@ -163,7 +227,13 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Load appliances then start per-device steps."""
         entry = self.hass.config_entries.async_get_entry(self._entry_id)
-        self._appliances = self.hass.data[DOMAIN][self._entry_id]["appliances"]
+        runtime = self.hass.data.get(DOMAIN, {}).get(self._entry_id)
+        if entry is None or runtime is None:
+            # The entry is not loaded (bad credentials, cloud outage). The options are
+            # per appliance and the appliance list comes from the running integration, so
+            # there is nothing to show — say that rather than raising KeyError at the user.
+            return self.async_abort(reason="entry_not_loaded")
+        self._appliances = runtime["appliances"]
         self._pending_appliances = list(self._appliances)
         self._options = dict(entry.options)
         return await self._async_next_device_step()

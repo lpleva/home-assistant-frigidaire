@@ -5,12 +5,14 @@ from __future__ import annotations
 import threading
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .auth_store import load_auth, per_entry_auth_path, purge_legacy_auth, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
+from .helpers import is_auth_failure
 from .vendor import frigidaire
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
@@ -22,7 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up frigidaire from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    def setup(username: str, password: str) -> tuple[frigidaire.Frigidaire, list[frigidaire.Appliance]]:
+    def setup(username: str, password: str | None) -> tuple[frigidaire.Frigidaire, list[frigidaire.Appliance]]:
         # Each entry persists to its own file under .storage so multiple accounts don't
         # clobber each other's session keys (which would force re-auth and trip cas_3403).
         auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
@@ -42,10 +44,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
-                timeout=60,
+                # Bounded so a hung endpoint cannot pin a Home Assistant executor thread
+                # for minutes: ConfigEntryNotReady already retries setup, so a long
+                # in-library retry only delays the failure report.
+                timeout=30,
                 session_key=session_key,
                 regional_base_url=regional_base_url,
                 on_session_key_update=persist_session_key,
+                session_max_retries=1,
             )
             persist_session_key(client.session_key, client.regional_base_url)
             # The key now lives in .storage with 0600; drop the world-readable copies the
@@ -66,9 +72,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # platform error code is only available structurally on the exception.
             if getattr(err, "error_code", None) == "cas_3403":
                 raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
+            if is_auth_failure(err):
+                # The one failure retrying cannot fix. This is what puts a
+                # "reconfigure" card in the UI instead of retrying forever.
+                raise ConfigEntryAuthFailed("Frigidaire credentials are no longer valid") from err
             raise ConfigEntryNotReady(f"Frigidaire error during setup{_error_context(err)}: {err}") from err
+        except Exception as err:  # noqa: BLE001 - a malformed cloud record must retry, not abort
+            # Without this, an unexpected shape in the appliance list aborts setup outright
+            # (no retry, just a traceback) and the appliances vanish until a restart.
+            raise ConfigEntryNotReady(f"Unexpected Frigidaire response during setup: {err}") from err
 
-    client, appliances = await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
+    client, appliances = await hass.async_add_executor_job(
+        setup, entry.data[CONF_USERNAME], entry.data.get(CONF_PASSWORD)
+    )
+
+    if CONF_PASSWORD in entry.data:
+        # Migration: older versions kept the account password in the config entry, which
+        # persists it in cleartext to .storage/core.config_entries and into every backup.
+        # The session key is the credential now; if it ever stops working, the reauth flow
+        # asks for the password again. Done before the update listener is registered, so
+        # this does not bounce the entry through a reload.
+        hass.config_entries.async_update_entry(
+            entry, data={k: v for k, v in entry.data.items() if k != CONF_PASSWORD}
+        )
 
     # One request per poll cycle for the whole account: the account coordinator is the
     # only thing that polls, and it pushes each appliance's record to that appliance's
@@ -107,6 +133,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        data = hass.data[DOMAIN].pop(entry.entry_id)
+        # Closing releases the requests.Session's connection pool, which every reload
+        # used to leak. The account-scoped rate limiter stays: another entry for the same
+        # account may still be spacing its requests against it.
+        await hass.async_add_executor_job(data["client"].close)
 
     return unload_ok

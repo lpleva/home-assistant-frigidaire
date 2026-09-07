@@ -29,6 +29,13 @@
           "cool_hysteresis": "Temperature deadband around the setpoint used by the estimate. Zero disables the deadband.",
           "compressor_off_delay": "How long the room must remain below the lower deadband boundary before the estimate changes to idle."
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate Frigidaire",
+        "description": "The stored session for {username} is no longer valid. Enter the current Frigidaire app password.",
+        "data": {
+          "password": "[%key:common::config_flow::data::password%]"
+        }
       }
     },
     "error": {
@@ -38,7 +45,8 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
   },
   "options": {
@@ -66,6 +74,9 @@
           "compressor_off_delay": "How long the room must remain below the lower deadband boundary before the estimate changes to idle."
         }
       }
+    },
+    "abort": {
+      "entry_not_loaded": "The Frigidaire integration is not currently set up. Fix the connection first, then change options."
     }
   },
   "entity": {
@@ -74,7 +85,8 @@
         "state": {
           "off": "Empty",
           "on": "Full"
-        }
+        },
+        "name": "Bucket status"
       }
     }
   }

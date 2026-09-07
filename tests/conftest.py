@@ -55,6 +55,7 @@ class StubFrigidaire:
         self.details_error: Exception | None = None
         self.appliances_error: Exception | None = None
         self.raw_fetch_count = 0
+        self.closed = False
 
     def get_appliances(self) -> list[frigidaire.Appliance]:
         if self.appliances_error is not None:
@@ -79,6 +80,9 @@ class StubFrigidaire:
 
     def execute_action(self, appliance: frigidaire.Appliance, action: list[frigidaire.Component]) -> None:
         self.commands.extend((component.name, component.value) for component in action)
+
+    def close(self) -> None:
+        self.closed = True
 
 
 @pytest.fixture(autouse=True)

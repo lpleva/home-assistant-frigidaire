@@ -65,3 +65,15 @@ async def test_air_conditioner_options_include_compressor_fields_and_serialize(
     await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.options["AC-LEGACY-1"]["cool_hysteresis"] == 1.5
     assert entry.options["AC-LEGACY-1"]["compressor_off_delay"] == 60
+
+
+async def test_options_abort_cleanly_when_the_entry_is_not_loaded(hass: HomeAssistant, setup_entry) -> None:
+    """A user opening options on a broken entry gets a message, not a KeyError."""
+    entry, _stub = await setup_entry([LEGACY_AC])
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "entry_not_loaded"

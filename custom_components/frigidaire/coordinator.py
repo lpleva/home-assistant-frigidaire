@@ -9,6 +9,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .compressor import CompressorEstimator
@@ -19,6 +20,7 @@ from .const import (
     DEFAULT_COMPRESSOR_OFF_DELAY,
     DEFAULT_COOL_HYSTERESIS,
 )
+from .helpers import is_auth_failure, normalize_enum_value
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
@@ -37,12 +39,6 @@ FAN_SPEED_STATE_KEY = "fanSpeedState"
 # properties.reported dict that becomes coordinator.data.
 CONNECTION_STATE_KEY = "connectionState"
 CONNECTED_STATE = "CONNECTED"
-
-
-def _normalize(value: Any) -> Any:
-    if isinstance(value, str):
-        return value.upper()
-    return value
 
 
 def _coerce_float(value: Any, default: float) -> float:
@@ -91,6 +87,11 @@ class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         try:
             records = await self.hass.async_add_executor_job(self.client.get_appliances_raw)
         except (frigidaire.FrigidaireException, ConnectionError) as err:
+            if isinstance(err, frigidaire.FrigidaireException) and is_auth_failure(err):
+                # Raising this from a coordinator is what starts the reauth flow. Backing
+                # off instead would leave the entities unavailable indefinitely with
+                # nothing in the UI to say the password needs re-entering.
+                raise ConfigEntryAuthFailed("Frigidaire credentials are no longer valid") from err
             self._failure_count += 1
             # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
             # The exponent is capped so timedelta can't overflow after a very long outage;
@@ -216,15 +217,15 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
             frigidaire.FanSpeed.LOW: "low",
             frigidaire.FanSpeed.MEDIUM: "medium",
             frigidaire.FanSpeed.HIGH: "high",
-        }.get(_normalize(raw), str(raw).lower())
+        }.get(normalize_enum_value(raw), str(raw).lower())
 
     def _update_compressor_estimate(self, details: dict) -> None:
         """Update the opt-in estimate from one coordinator response."""
         if self._compressor_estimator is None:
             return
 
-        mode = _normalize(details.get(frigidaire.Detail.MODE))
-        appliance_state = _normalize(details.get(frigidaire.Detail.APPLIANCE_STATE))
+        mode = normalize_enum_value(details.get(frigidaire.Detail.MODE))
+        appliance_state = normalize_enum_value(details.get(frigidaire.Detail.APPLIANCE_STATE))
         if mode == frigidaire.Mode.OFF or (
             appliance_state is not None and appliance_state != frigidaire.ApplianceState.RUNNING
         ):
@@ -237,7 +238,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
             self._compressor_running = None
             return
 
-        unit = _normalize(details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
+        unit = normalize_enum_value(details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
         if unit == frigidaire.Unit.FAHRENHEIT:
             current = details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
             target = details.get(frigidaire.Detail.TARGET_TEMPERATURE_F)
@@ -256,7 +257,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         The whole record is used rather than just properties.reported: connectionState
         is a sibling of "properties" and is dropped by get_appliance_details().
         """
-        self._connection_state = _normalize(record.get(CONNECTION_STATE_KEY))
+        self._connection_state = normalize_enum_value(record.get(CONNECTION_STATE_KEY))
         # coordinator.data stays exactly the properties.reported dict that every platform
         # already indexes with frigidaire.Detail keys.
         reported = (record.get("properties") or {}).get("reported")

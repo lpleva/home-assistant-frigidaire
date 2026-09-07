@@ -2,8 +2,35 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar
+
+
+def normalize_enum_value(value: Any) -> Any:
+    """Upper-case API strings so they compare equal to the library's str enums.
+
+    Newer appliance firmware reports "running" where older units report "RUNNING".
+    """
+    if isinstance(value, str):
+        return value.upper()
+    return value
+
+
+def is_auth_failure(err: Exception) -> bool:
+    """Whether a library error means the stored credentials no longer work.
+
+    Structural first: the client sets status_code and error_code on FrigidaireException.
+    The message match is a fallback for wording this fork does not control, not the
+    contract — classifying on the English text alone silently turns every wrong password
+    into "cannot connect" the moment that wording changes.
+    """
+    if getattr(err, "error_code", None) in ("invalid_credentials", "reauth_required"):
+        return True
+    if getattr(err, "status_code", None) in (401, 403):
+        return True
+    return "Failed to authenticate" in str(err)
 
 
 def suggest_area(hass: HomeAssistant, nickname: str) -> str | None:
