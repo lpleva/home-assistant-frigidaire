@@ -1,6 +1,7 @@
 """Frigidaire 2.0 API client"""
 
 import gzip
+import hashlib
 import json
 import logging
 import random
@@ -130,6 +131,19 @@ def _redact_payload(payload: str) -> str:
     if not isinstance(data, dict):
         return payload
     return json.dumps({k: ("<redacted>" if k in _REDACT_PAYLOAD_KEYS else v) for k, v in data.items()})
+
+
+def _require_field(response: dict, key: str, what: str) -> str:
+    """Read a required field from an auth response, naming the keys rather than the body.
+
+    These responses carry session tokens, so a failure reports which keys arrived and
+    nothing else. Raising FrigidaireException (not KeyError) also keeps the failure inside
+    the class callers already handle.
+    """
+    value = response.get(key)
+    if not value:
+        raise FrigidaireException(f"Failed to authenticate: {key} missing from {what} (keys: {sorted(response)})")
+    return value
 
 
 class FrigidaireException(Exception):
@@ -267,9 +281,16 @@ class Detail(str, Enum):
 
 class Appliance:
     def __init__(self, args: dict):
-        self.appliance_id: str = args["applianceId"]
-        self.appliance_type: str = args["applianceData"]["modelName"]
-        self.nickname: str = args["applianceData"]["applianceName"]
+        # Every field except the id is optional: the cloud has shipped records without
+        # applianceData, and one such record used to raise KeyError out of the list
+        # comprehension in get_appliances(), taking every other appliance with it.
+        appliance_data = args.get("applianceData") or {}
+        appliance_id = args.get("applianceId")
+        if not appliance_id:
+            raise ValueError(f"Appliance record has no applianceId; keys: {sorted(args)}")
+        self.appliance_id: str = appliance_id
+        self.appliance_type: str = appliance_data.get("modelName") or ""
+        self.nickname: str = appliance_data.get("applianceName") or appliance_id
         self.destination = self._resolve_destination(args)
 
     def _resolve_destination(self, args: dict) -> Optional["Destination"]:
@@ -282,23 +303,23 @@ class Appliance:
         # keys (ambient temperature, temperature representation) are also reported by
         # dehumidifiers that display room temp. Note that a humidity *reading*
         # ("sensorHumidity") is not a DH marker — some ACs report one too.
-        reported_keys = set(args.get("properties", {}).get("reported", {}).keys())
+        reported_keys = set(((args.get("properties") or {}).get("reported") or {}).keys())
         if reported_keys & _DH_PROPERTY_KEYS:
-            logging.warning(
+            _LOGGER.warning(
                 f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
                 f"({self.appliance_id}) — inferred DEHUMIDIFIER from reported properties. "
                 f"Please report this at https://github.com/bm1549/frigidaire/issues"
             )
             return Destination.DEHUMIDIFIER
         if reported_keys & _AC_PROPERTY_KEYS:
-            logging.warning(
+            _LOGGER.warning(
                 f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
                 f"({self.appliance_id}) — inferred AIR_CONDITIONER from reported properties. "
                 f"Please report this at https://github.com/bm1549/frigidaire/issues"
             )
             return Destination.AIR_CONDITIONER
 
-        logging.warning(
+        _LOGGER.warning(
             f"Unrecognized appliance type '{self.appliance_type}' for '{self.nickname}' "
             f"({self.appliance_id}) — skipping. Reported keys: {sorted(reported_keys)}. "
             f"Please report this at https://github.com/bm1549/frigidaire/issues"
@@ -444,7 +465,7 @@ class Action:
         # Temperature ranges are below, inclusive of the endpoints
         #   Fahrenheit: 60-90
         #   Celsius: 16-32
-        logging.debug(f"Client setting target to {temperature} {temperature_unit}")
+        _LOGGER.debug(f"Client setting target to {temperature} {temperature_unit}")
         temperature_unit_setting = (
             Setting.TARGET_TEMPERATURE_F if temperature_unit == Unit.FAHRENHEIT else Setting.TARGET_TEMPERATURE_C
         )
@@ -453,6 +474,11 @@ class Action:
             Component(Setting.TEMPERATURE_REPRESENTATION, temperature_unit),
             Component(temperature_unit_setting, temperature),
         ]
+
+
+def _scope_key(raw: str) -> str:
+    """Stable, non-identifying key for the shared limiter and re-auth lock."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _generate_nonce() -> str:
@@ -538,7 +564,11 @@ class Frigidaire:
         self._on_session_key_update = on_session_key_update
 
         self._session = requests.Session()
-        scope = rate_limit_scope_key or username
+        # Hashed, because these dicts live for the life of the process and are never
+        # cleaned up: keying them by the raw address would leave the account's email in a
+        # module global (and in any heap dump) for every typo ever entered.
+        scope = _scope_key(rate_limit_scope_key or username)
+        self._scope = scope
         limiter = _SCOPED_LIMITERS.setdefault(scope, RateLimiter(rate_limit_min_interval, rate_limit_jitter))
         self._reauth_lock = _SCOPED_REAUTH_LOCKS.setdefault(scope, threading.Lock())
         self._session.request = wrap_session_request(  # type: ignore[method-assign]
@@ -600,14 +630,24 @@ class Frigidaire:
         # Remember to include "Context-Brand: frigidaire" in the headers for
         # the "/api/v1/identity-providers" and "/api/v1/users/current" calls
         if self.session_key:
-            logging.debug("Authentication requested but session key is present, testing session key")
+            _LOGGER.debug("Authentication requested but session key is present, testing session key")
             try:
                 self.test_connection()
-                logging.debug("Session key is still valid, doing nothing")
+                _LOGGER.debug("Session key is still valid, doing nothing")
                 return None
             except (FrigidaireException, ConnectionError):
-                logging.debug("Session key is invalid, re-authenticating")
+                _LOGGER.debug("Session key is invalid, re-authenticating")
                 self.session_key = None
+
+        if not self.password:
+            # The caller holds no password (Home Assistant keeps it out of the config
+            # entry once a session key exists), so a full login is impossible. Say so
+            # structurally instead of POSTing an empty password to Gigya.
+            raise FrigidaireException(
+                "Session expired and no password is held; the account must be re-authenticated",
+                status_code=401,
+                error_code="reauth_required",
+            )
 
         data = {"grantType": "client_credentials", "clientId": CLIENT_ID, "clientSecret": CLIENT_SECRET, "scope": ""}
         session_key_response = self._post_dict(
@@ -616,7 +656,7 @@ class Frigidaire:
             self.get_headers_frigidaire("POST", include_bearer_token=False),
             data,
         )
-        self.session_key = session_key_response["accessToken"]
+        self.session_key = _require_field(session_key_response, "accessToken", "client-credentials response")
 
         identity_providers_response = self._get_list_of_dicts(
             GLOBAL_API_URL,
@@ -648,8 +688,8 @@ class Frigidaire:
             form_encoding=True,
         )
 
-        auth_gmid = get_ids_response["gmid"]
-        auth_ucid = get_ids_response["ucid"]
+        auth_gmid = _require_field(get_ids_response, "gmid", "socialize.getIDs response")
+        auth_ucid = _require_field(get_ids_response, "ucid", "socialize.getIDs response")
 
         data = {
             "apiKey": identity_api_key,
@@ -677,7 +717,18 @@ class Frigidaire:
             or session_info.get("sessionToken") is None
             or session_info.get("sessionSecret") is None
         ):
-            raise FrigidaireException(f"Failed to authenticate, sessionInfo was not in response: {login_response}")
+            # Report the shape, never the body: this response carries session tokens, and
+            # this message ends up in the caller's log. Gigya reports a wrong password as
+            # errorCode 403042 (and other 4030xx codes), so say so structurally rather
+            # than leaving the caller to match on the wording.
+            error_code = login_response.get("errorCode")
+            invalid_credentials = str(error_code).startswith("4030")
+            raise FrigidaireException(
+                "Failed to authenticate: sessionInfo missing or incomplete "
+                f"(response keys: {sorted(login_response)}, errorCode: {error_code})",
+                status_code=401 if invalid_credentials else None,
+                error_code="invalid_credentials" if invalid_credentials else None,
+            )
 
         auth_session_token = session_info["sessionToken"]
         auth_session_secret = session_info["sessionSecret"]
@@ -707,7 +758,7 @@ class Frigidaire:
             form_encoding=True,
         )
 
-        auth_jwt = jwt_response["id_token"]
+        auth_jwt = _require_field(jwt_response, "id_token", "accounts.getJWT response")
 
         data = {
             "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
@@ -724,11 +775,13 @@ class Frigidaire:
 
         access_token = frigidaire_auth_response.get("accessToken")
         if access_token is None:
+            # Same reasoning as above: the token-exchange body can carry a refresh token.
             raise FrigidaireException(
-                f"Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}"
+                "Failed to authenticate: accessToken missing from token response "
+                f"(response keys: {sorted(frigidaire_auth_response)})"
             )
 
-        logging.debug("Authentication successful, storing new session key")
+        _LOGGER.debug("Authentication successful, storing new session key")
         self.session_key = access_token
         self._emit_session_key_update()
 
@@ -742,7 +795,15 @@ class Frigidaire:
         try:
             self._on_session_key_update(self.session_key, self.regional_base_url)
         except Exception:
-            logging.exception("on_session_key_update callback failed")
+            _LOGGER.exception("on_session_key_update callback failed")
+
+    def close(self) -> None:
+        """Release the HTTP session and its connection pool.
+
+        The scoped limiter and re-auth lock are deliberately left in place: another live
+        client for the same account may still be spacing its requests against them.
+        """
+        self._session.close()
 
     def re_authenticate(self) -> None:
         """
@@ -788,19 +849,19 @@ class Frigidaire:
                 return fn()
             except FrigidaireException as e:
                 if self._is_session_cap(e):
-                    logging.debug("Rate limited - try again later")
+                    _LOGGER.debug("Rate limited - try again later")
                     raise
                 if attempt == last_attempt:
                     raise
                 if attempt == last_attempt - 1:
                     with self._reauth_lock:
                         if self.session_key == key_before:
-                            logging.debug("Retry failed - attempting to re-authenticate")
+                            _LOGGER.debug("Retry failed - attempting to re-authenticate")
                             self.re_authenticate()
                         else:
-                            logging.debug("Another request already re-authenticated - retrying with the new session")
+                            _LOGGER.debug("Another request already re-authenticated - retrying with the new session")
                 else:
-                    logging.debug("Request failed - retrying on the existing session")
+                    _LOGGER.debug("Request failed - retrying on the existing session")
                 if self._session_retry_backoff:
                     time.sleep(self._session_retry_backoff * (attempt + 1))
         raise AssertionError("unreachable")  # pragma: no cover
@@ -818,10 +879,24 @@ class Frigidaire:
         Will authenticate if the request fails
         :return: The appliances that are associated with the Frigidaire account
         """
-        logging.debug("Listing appliances")
+        _LOGGER.debug("Listing appliances")
 
         def fetch() -> list[Appliance]:
-            return [a for a in (Appliance(raw) for raw in self._fetch_raw_appliances()) if a.destination is not None]
+            appliances = []
+            for raw in self._fetch_raw_appliances():
+                try:
+                    appliance = Appliance(raw)
+                except (ValueError, KeyError, TypeError):
+                    # One unparseable record must not cost the caller every other
+                    # appliance on the account.
+                    _LOGGER.warning(
+                        "Skipping unparseable appliance record with keys %s",
+                        sorted(raw) if isinstance(raw, dict) else type(raw).__name__,
+                    )
+                    continue
+                if appliance.destination is not None:
+                    appliances.append(appliance)
+            return appliances
 
         return self._with_reauth(fetch)
 
@@ -835,7 +910,7 @@ class Frigidaire:
         get_appliance_details() per appliance, which each repeat the same request.
         :return: The full raw appliance records
         """
-        logging.debug("Getting raw records for every appliance")
+        _LOGGER.debug("Getting raw records for every appliance")
         return self._with_reauth(self._fetch_raw_appliances)
 
     def get_appliance_raw(self, appliance: Appliance) -> dict:
@@ -850,7 +925,7 @@ class Frigidaire:
         :param appliance: The appliance to request from the API
         :return: The full raw appliance record
         """
-        logging.debug(f"Getting raw appliance record for appliance {appliance.nickname}")
+        _LOGGER.debug(f"Getting raw appliance record for appliance {appliance.nickname}")
         for raw_appliance in self.get_appliances_raw():
             if raw_appliance["applianceId"] == appliance.appliance_id:
                 return raw_appliance
@@ -863,7 +938,7 @@ class Frigidaire:
         :param appliance: The appliance to request from the API
         :return: The details for the passed in appliance
         """
-        logging.debug(f"Getting appliance details for appliance {appliance.nickname}")
+        _LOGGER.debug(f"Getting appliance details for appliance {appliance.nickname}")
         return self.get_appliance_raw(appliance)["properties"]["reported"]
 
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
@@ -921,7 +996,7 @@ class Frigidaire:
             else:
                 response_dict = response.json()
         except Exception as e:
-            logging.error(e)
+            _LOGGER.error(e)
             raise FrigidaireException(f"Received an unexpected response:\n{response.content!r}") from e
 
         return response_dict
@@ -939,7 +1014,7 @@ class Frigidaire:
             f"Error processing request ({type(e).__name__}):\n"
             f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
         )
-        logging.warning(error_str)
+        _LOGGER.warning(error_str)
         # Preserve structured error info from the wrapped exception so re-auth logic
         # downstream can still recognise the failure class (e.g. the cas_3403 session cap).
         raise FrigidaireException(

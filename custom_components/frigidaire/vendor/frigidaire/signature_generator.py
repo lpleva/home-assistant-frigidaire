@@ -4,8 +4,11 @@
 import base64
 import hashlib
 import hmac
+import logging
 import urllib.parse
 from collections import OrderedDict
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _build_encoded_query(params: dict) -> str:
@@ -44,6 +47,8 @@ def get_signature(secret: str, http_method: str, url: str, params: dict) -> str 
             f"{http_method.upper()}&{_url_encode(normalized_url)}&{_url_encode(_build_encoded_query(params))}"
         )
         return _encode_signature(base_signature, secret)
-    except Exception as ex:
-        print(f"Error generating signature: {ex}")
+    except Exception:
+        # print() bypasses Home Assistant's logging entirely; in a container it lands in
+        # the raw stdout stream instead of home-assistant.log.
+        _LOGGER.exception("Error generating Gigya request signature")
         return None

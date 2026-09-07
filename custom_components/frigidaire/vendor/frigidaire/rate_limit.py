@@ -29,12 +29,18 @@ class RateLimiter:
         self._next_ok_at = 0.0  # monotonic timestamp (seconds)
 
     def wait(self) -> None:
+        """Block until the next call is allowed, without holding the lock while sleeping.
+
+        Sleeping inside the lock made every other waiting thread pay this thread's delay
+        on top of its own: the limiter is shared across all appliances on an account.
+        """
         with self._lock:
             now = time.monotonic()
-            if now < self._next_ok_at:
-                time.sleep(self._next_ok_at - now)
+            sleep_for = max(0.0, self._next_ok_at - now)
             delay = self._min + (random.uniform(0.0, self._jitter) if self._jitter else 0.0)
-            self._next_ok_at = time.monotonic() + delay
+            self._next_ok_at = max(now, self._next_ok_at) + delay
+        if sleep_for:
+            time.sleep(sleep_for)
 
     def cool_down(self, extra_seconds: float) -> None:
         if extra_seconds <= 0:

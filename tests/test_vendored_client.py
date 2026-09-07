@@ -247,3 +247,106 @@ def test_parse_response_raises_on_an_unparseable_body() -> None:
     response = FakeResponse(content=b"<html>nope</html>")
     with pytest.raises(frigidaire.FrigidaireException, match="unexpected response"):
         frigidaire.Frigidaire.parse_response(response)
+
+
+# --- malformed records, log hygiene, lifecycle -------------------------------------
+
+
+def test_appliance_survives_a_record_missing_appliance_data() -> None:
+    appliance = frigidaire.Appliance({"applianceId": "DH-1", "properties": {"reported": {"targetHumidity": 45}}})
+    assert appliance.appliance_id == "DH-1"
+    assert appliance.nickname == "DH-1"  # falls back to the id rather than raising
+    assert appliance.destination == frigidaire.Destination.DEHUMIDIFIER
+
+
+def test_appliance_without_an_id_is_rejected() -> None:
+    with pytest.raises(ValueError, match="applianceId"):
+        frigidaire.Appliance({"applianceData": {"modelName": "DH", "applianceName": "x"}})
+
+
+def test_one_unparseable_record_does_not_lose_the_others(caplog) -> None:
+    good = {
+        "applianceId": "DH-1",
+        "applianceData": {"modelName": "DH", "applianceName": "Basement"},
+        "properties": {"reported": {}},
+    }
+    client = _client()
+    with patch.object(frigidaire.Frigidaire, "_fetch_raw_appliances", return_value=[{"nope": True}, good]):
+        appliances = client.get_appliances()
+
+    assert [a.appliance_id for a in appliances] == ["DH-1"]
+    assert "Skipping unparseable appliance record" in caplog.text
+
+
+def test_a_failed_login_reports_key_names_not_the_response_body() -> None:
+    client = _client()
+    login_response = {
+        "errorCode": 403042,
+        "errorMessage": "Invalid LoginID",
+        "sessionInfo": None,
+        "regToken": "SECRET-REG-TOKEN",
+    }
+    session = RecordingSession(
+        [
+            FakeResponse({"accessToken": "client-credentials-token"}),
+            FakeResponse(
+                [
+                    {
+                        "domain": "us1.gigya.com",
+                        "apiKey": "gigya-key",
+                        "httpRegionalBaseUrl": "https://api.us.ocp.electrolux.one",
+                    }
+                ]
+            ),
+            FakeResponse({"gmid": "g", "ucid": "u"}),
+            FakeResponse(login_response),
+        ]
+    )
+    client._session = session
+    client.session_key = None
+    client.regional_base_url = None
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.authenticate()
+
+    message = str(excinfo.value)
+    assert "SECRET-REG-TOKEN" not in message
+    assert "sessionInfo" in message
+    # Classified structurally, so callers do not have to match on the wording.
+    assert excinfo.value.error_code == "invalid_credentials"
+    assert excinfo.value.status_code == 401
+
+
+def test_authenticating_without_a_password_asks_for_reauth_instead_of_logging_in() -> None:
+    client = _client()
+    session = RecordingSession()
+    client._session = session
+    client.password = None
+    client.session_key = None
+    client.regional_base_url = None
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.authenticate()
+
+    assert excinfo.value.error_code == "reauth_required"
+    assert session.calls == []
+
+
+def test_rate_limiter_does_not_hold_its_lock_while_sleeping() -> None:
+    limiter = rate_limit.RateLimiter(min_interval=0.05, jitter=0)
+    limiter.wait()  # arms the next slot
+    limiter.wait()  # must sleep for it
+    assert limiter._lock.acquire(blocking=False)
+    limiter._lock.release()
+
+
+def test_the_shared_limiter_is_not_keyed_by_the_account_email() -> None:
+    _client()
+    assert not any("user@example.com" in key for key in frigidaire._SCOPED_LIMITERS)
+    assert frigidaire._scope_key("user@example.com") in frigidaire._SCOPED_LIMITERS
+
+
+def test_close_releases_the_http_session() -> None:
+    client = _client()
+    client.close()
+    assert client._recording_session.closed
