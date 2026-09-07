@@ -79,7 +79,8 @@ Each entry names the audit finding it answers.
   connection pool.
 - **L3 — no `print()`.** `signature_generator.get_signature` logs the failure
   through `_LOGGER.exception` instead of printing to stdout.
-- **H3 support — no password, no login attempt.** `authenticate()` raises
+- **H3 support — no password, no login attempt.** `password` is typed
+  `str | None` and documented as such, and `authenticate()` raises
   `FrigidaireException(..., error_code="reauth_required")` when the cached
   session is gone and no password is held, instead of POSTing an empty
   password. This is what lets the integration keep the password out of the

@@ -497,7 +497,7 @@ class Frigidaire:
     def __init__(
         self,
         username: str,
-        password: str,
+        password: str | None,
         session_key: str | None = None,
         timeout: float | None = 15.0,
         regional_base_url: str | None = None,
@@ -516,7 +516,10 @@ class Frigidaire:
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
         :param username: The username to log in to Frigidaire. Generally, this is an email
-        :param password: The password to log in to Frigidaire
+        :param password: The password to log in to Frigidaire. None means session-key only:
+                            the client will use the session_key it is given, and once that
+                            session is gone it raises FrigidaireException with
+                            error_code="reauth_required" rather than attempting a login.
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
         :param timeout: Per-request HTTP timeout in seconds (default 15.0). None falls back to
