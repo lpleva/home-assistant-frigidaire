@@ -26,7 +26,13 @@ def is_auth_failure(err: Exception) -> bool:
     contract — classifying on the English text alone silently turns every wrong password
     into "cannot connect" the moment that wording changes.
     """
-    if getattr(err, "error_code", None) in ("invalid_credentials", "reauth_required"):
+    error_code = getattr(err, "error_code", None)
+    if error_code == "cas_3403":
+        # The active-session cap. It can arrive with a 4xx status, but the credentials are
+        # fine — prompting for the password would be wrong, and re-authenticating to
+        # "fix" it mints yet another session and makes it worse.
+        return False
+    if error_code in ("invalid_credentials", "reauth_required"):
         return True
     if getattr(err, "status_code", None) in (401, 403):
         return True

@@ -115,3 +115,14 @@ async def test_setup_drops_a_password_left_in_the_config_entry(hass: HomeAssista
     assert entry.state is ConfigEntryState.LOADED
     assert "password" not in entry.data
     assert entry.data["username"] == "user@example.com"
+
+
+async def test_the_session_cap_does_not_prompt_for_a_password(hass: HomeAssistant, setup_entry) -> None:
+    """cas_3403 means too many sessions, not wrong credentials; re-auth would make it worse."""
+    _entry, stub = await setup_entry([LEGACY_AC])
+    stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=403, error_code="cas_3403")
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert _reauth_flows(hass) == []
