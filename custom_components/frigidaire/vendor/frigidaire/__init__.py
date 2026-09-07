@@ -1041,7 +1041,12 @@ class Frigidaire:
         try:
             # No verify= argument anywhere in this class: requests validates the
             # certificate chain and hostname against the system trust store.
-            response = self._session.get(full_url, headers=headers)
+            # allow_redirects=False because the allowlist checks the URL this client
+            # builds, not where a 3xx would send it: requests replays the body of a
+            # 307/308 to the redirect target, which for /accounts.login is the account
+            # password. Electrolux does not redirect in this flow, so a 3xx is an error
+            # and parse_response reports it as one.
+            response = self._session.get(full_url, headers=headers, allow_redirects=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "GET", f"{url}{path}", headers, "")
@@ -1061,7 +1066,9 @@ class Frigidaire:
         full_url = _validate_request_url(f"{url}{path}")
         try:
             encoded_data = urlencode(data) if form_encoding else json.dumps(data)
-            response = self._session.post(full_url, data=encoded_data, headers=headers)
+            # allow_redirects=False: see get_request. This is the call that carries the
+            # password, so a redirect must never be followed.
+            response = self._session.post(full_url, data=encoded_data, headers=headers, allow_redirects=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "POST", f"{url}{path}", headers, json.dumps(data))
@@ -1078,7 +1085,8 @@ class Frigidaire:
         encoded_data = json.dumps(data)
         full_url = _validate_request_url(f"{url}{path}")
         try:
-            response = self._session.put(full_url, data=encoded_data, headers=headers)
+            # allow_redirects=False: see get_request.
+            response = self._session.put(full_url, data=encoded_data, headers=headers, allow_redirects=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "PUT", f"{url}{path}", headers, encoded_data)

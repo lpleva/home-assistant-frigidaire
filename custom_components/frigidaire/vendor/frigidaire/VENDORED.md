@@ -26,8 +26,7 @@ Each entry names the audit finding it answers.
 - **C1 — TLS verification is on everywhere.** `verify=False` is gone from
   `get_request`, `post_request`, and `put_request`; `requests` uses the system
   trust store. The wrapper in `rate_limit.py` rejects any call that tries to
-  pass `verify=False` (or a `cert`/`verify` override that weakens TLS), so the
-  flag cannot come back through a keyword argument.
+  pass `verify=False`, so the flag cannot come back through a keyword argument.
 - **C1 — identity and API hosts are checked against an allowlist.** The
   `domain`, `apiKey`, and `httpRegionalBaseUrl` values taken from the
   `identity-providers` response are validated before the credential POST:
@@ -36,8 +35,14 @@ Each entry names the audit finding it answers.
   `https://` on a known Electrolux host (`_ALLOWED_API_HOST_SUFFIXES`). A value
   outside the allowlist raises `FrigidaireException` and no credentials are
   sent. Every request URL is re-checked at the point it is built
-  (`_validate_request_url`), so a redirected or malformed base URL cannot leak
-  the bearer token either.
+  (`_validate_request_url`), so a malformed base URL restored from the caller's
+  own cache cannot leak the bearer token either.
+- **C1 — redirects are not followed.** All three request methods pass
+  `allow_redirects=False`. The allowlist checks the URL this client builds, not
+  the host a 3xx would send it to, and `requests` replays the request body on a
+  307/308 — which for `/accounts.login` is the account password. Electrolux does
+  not redirect in this flow, so a 3xx is now reported as a failure like any
+  other non-200 status.
 - **H1 — no process-wide warning suppression.** The import-time
   `urllib3.disable_warnings(InsecureRequestWarning)` call and the comment that
   justified it are deleted, along with the now-unused `urllib3` import.

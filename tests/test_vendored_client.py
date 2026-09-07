@@ -350,3 +350,24 @@ def test_close_releases_the_http_session() -> None:
     client = _client()
     client.close()
     assert client._recording_session.closed
+
+
+def test_requests_do_not_follow_redirects() -> None:
+    """A 307/308 replays the body — for /accounts.login, that body is the password."""
+    client = _client()
+    session: RecordingSession = client._recording_session
+
+    client.get_request(client.regional_base_url, "/x", {})
+    client.post_request(client.regional_base_url, "/x", {}, {"a": 1})
+    client.put_request(client.regional_base_url, "/x", {}, {"a": 1})
+
+    assert len(session.calls) >= 4
+    for _method, _url, kwargs in session.calls:
+        assert kwargs["allow_redirects"] is False
+
+
+def test_a_redirect_is_reported_as_a_failure_rather_than_followed() -> None:
+    response = FakeResponse({}, status_code=307, headers={"Location": "https://attacker.example/"})
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        frigidaire.Frigidaire.parse_response(response)
+    assert excinfo.value.status_code == 307
