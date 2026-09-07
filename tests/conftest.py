@@ -33,8 +33,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "custom_compone
 import vendor  # noqa: E402
 from vendor import frigidaire  # noqa: E402
 
-sys.modules.setdefault("custom_components.frigidaire.vendor", vendor)
-sys.modules.setdefault("custom_components.frigidaire.vendor.frigidaire", frigidaire)
+# Assignment, not setdefault: if either name is already taken, something has imported a
+# second copy of the vendored package and the aliasing is not doing its job — better to
+# overwrite loudly than to silently leave two module objects in play.
+assert "custom_components.frigidaire.vendor" not in sys.modules, "vendored package imported twice"
+sys.modules["custom_components.frigidaire.vendor"] = vendor
+sys.modules["custom_components.frigidaire.vendor.frigidaire"] = frigidaire
 
 DOMAIN = "frigidaire"
 
