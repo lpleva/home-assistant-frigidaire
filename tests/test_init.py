@@ -1,6 +1,10 @@
 """Config-entry setup and teardown against stubbed appliances."""
 
+import json
+import os
+import stat
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from homeassistant.config_entries import ConfigEntryState
@@ -104,3 +108,37 @@ async def test_record_without_properties_fails_the_poll(
 
     assert hass.states.get(entity_id_for(hass, "climate", "AC-LEGACY-1")).state == "unavailable"
     assert "no reported properties" in caplog.text
+
+
+async def test_session_key_is_written_owner_only_under_storage(hass: HomeAssistant, setup_entry, tmp_path) -> None:
+    """The token alone drives the appliance, so it must not sit world-readable in the config root."""
+    entry, _stub = await setup_entry([LEGACY_AC])
+
+    path = tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json"
+    assert path.is_file()
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+    assert json.loads(path.read_text())["session_key"] == "stub-session-key"
+    assert not (tmp_path / f"frigidaire-{entry.entry_id}.json").exists()
+
+
+async def test_a_pre_020_session_file_is_migrated_and_removed(
+    hass: HomeAssistant, frigidaire_stub, tmp_path
+) -> None:
+    """An existing user keeps their cached session instead of minting a new one (cas_3403)."""
+    hass.config.config_dir = str(tmp_path)
+    (tmp_path / "frigidaire.json").write_text(
+        json.dumps({"session_key": "old-key", "regional_base_url": "https://api.us.ocp.electrolux.one"})
+    )
+    stub = frigidaire_stub([LEGACY_AC])
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"username": "user@example.com", "password": "secret"}, unique_id="user@example.com"
+    )
+    entry.add_to_hass(hass)
+
+    with patch.object(frigidaire, "Frigidaire", return_value=stub) as client_cls:
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert client_cls.call_args.kwargs["session_key"] == "old-key"
+    assert not (tmp_path / "frigidaire.json").exists()
+    assert (tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json").is_file()

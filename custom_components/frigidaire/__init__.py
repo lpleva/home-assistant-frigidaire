@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
+from .auth_store import load_auth, per_entry_auth_path, purge_legacy_auth, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
 from .vendor import frigidaire
@@ -23,8 +23,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     def setup(username: str, password: str) -> tuple[frigidaire.Frigidaire, list[frigidaire.Appliance]]:
-        # Each entry persists to its own file so multiple accounts don't clobber
-        # each other's session keys (which would force re-auth and trip cas_3403).
+        # Each entry persists to its own file under .storage so multiple accounts don't
+        # clobber each other's session keys (which would force re-auth and trip cas_3403).
         auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
 
         def persist_session_key(session_key: str, regional_base_url: str | None) -> None:
@@ -48,6 +48,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 on_session_key_update=persist_session_key,
             )
             persist_session_key(client.session_key, client.regional_base_url)
+            # The key now lives in .storage with 0600; drop the world-readable copies the
+            # older versions left in the config root, where every backup picked them up.
+            purge_legacy_auth(hass.config.path(), entry.entry_id)
 
             # Fetch the appliance list once and share it across every platform
             # (climate, humidifier, number, switch) instead of each calling the

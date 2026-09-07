@@ -1,49 +1,97 @@
-"""Tests for the auth persistence + per-entry migration logic."""
+"""Tests for the auth persistence, file permissions, and the per-entry migration."""
+
+import json
+import os
+import stat
 
 import auth_store
 
 
 def test_save_then_load_round_trips(tmp_path) -> None:
-    path = str(tmp_path / "frigidaire-abc.json")
+    path = str(tmp_path / ".storage" / "frigidaire-abc.json")
     auth_store.save_auth(path, "the-key", "https://api.us.example")
     assert auth_store.load_auth(path) == ("the-key", "https://api.us.example")
 
 
-def test_load_missing_file_returns_none_pair(tmp_path) -> None:
-    session_key, base_url = auth_store.load_auth(str(tmp_path / "does-not-exist.json"))
-    assert (session_key, base_url) == (None, None)
+def test_saved_file_is_owner_only(tmp_path) -> None:
+    """The session key alone controls the appliance, so no group or world access."""
+    path = str(tmp_path / ".storage" / "frigidaire-abc.json")
+    auth_store.save_auth(path, "the-key", None)
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
-def test_per_entry_auth_path_is_scoped_by_entry_id(tmp_path) -> None:
+def test_save_leaves_no_temporary_files_behind(tmp_path) -> None:
+    path = str(tmp_path / ".storage" / "frigidaire-abc.json")
+    auth_store.save_auth(path, "one", None)
+    auth_store.save_auth(path, "two", None)
+    assert sorted(p.name for p in (tmp_path / ".storage").iterdir()) == ["frigidaire-abc.json"]
+    assert json.loads((tmp_path / ".storage" / "frigidaire-abc.json").read_text())["session_key"] == "two"
+
+
+def test_load_missing_file_returns_none_pair_and_creates_nothing(tmp_path) -> None:
+    missing = tmp_path / "does-not-exist.json"
+    assert auth_store.load_auth(str(missing)) == (None, None)
+    assert not missing.exists()
+
+
+def test_load_ignores_a_corrupt_file(tmp_path) -> None:
+    path = tmp_path / "frigidaire-abc.json"
+    path.write_text("{not json")
+    assert auth_store.load_auth(str(path)) == (None, None)
+
+
+def test_per_entry_auth_path_is_scoped_by_entry_id_and_lives_in_storage(tmp_path) -> None:
     path = auth_store.per_entry_auth_path(str(tmp_path), "entry-123")
-    assert path == str(tmp_path / "frigidaire-entry-123.json")
+    assert path == str(tmp_path / ".storage" / "frigidaire-entry-123.json")
 
 
 def test_resolve_prefers_per_entry_file_when_present(tmp_path) -> None:
-    """Once an entry has its own file, the legacy shared file is ignored."""
+    """Once an entry has its own file, every fallback is ignored."""
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire-e1.json").write_text("{}")
+    (tmp_path / ".storage" / "frigidaire.json").write_text("{}")
+    (tmp_path / "frigidaire.json").write_text("{}")  # pre-0.2.0 location too
+    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(
+        tmp_path / ".storage" / "frigidaire-e1.json"
+    )
+
+
+def test_resolve_falls_back_to_the_staged_shared_file(tmp_path) -> None:
+    """First setup after the config flow: the key the flow staged is picked up."""
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire.json").write_text("{}")
+    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(tmp_path / ".storage" / "frigidaire.json")
+
+
+def test_resolve_migrates_a_pre_020_per_entry_file_from_the_config_root(tmp_path) -> None:
     (tmp_path / "frigidaire-e1.json").write_text("{}")
-    (tmp_path / "frigidaire.json").write_text("{}")  # legacy present too
     assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(tmp_path / "frigidaire-e1.json")
 
 
-def test_resolve_falls_back_to_legacy_for_migration(tmp_path) -> None:
-    """First run for an entry with no file yet: migrate from the legacy shared file."""
-    (tmp_path / "frigidaire.json").write_text("{}")  # only legacy exists
+def test_resolve_migrates_the_pre_020_shared_file_from_the_config_root(tmp_path) -> None:
+    (tmp_path / "frigidaire.json").write_text("{}")
     assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(tmp_path / "frigidaire.json")
 
 
-def test_resolve_uses_per_entry_when_neither_exists(tmp_path) -> None:
-    """Fresh install, no legacy file: use the per-entry path (creating no legacy litter)."""
-    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(tmp_path / "frigidaire-e1.json")
+def test_resolve_uses_per_entry_when_nothing_exists(tmp_path) -> None:
+    """Fresh install: use the per-entry path, creating no legacy litter."""
+    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e1") == str(
+        tmp_path / ".storage" / "frigidaire-e1.json"
+    )
 
 
-def test_resolve_ignores_legacy_once_per_entry_written(tmp_path) -> None:
-    """A second entry must not pick up the first entry's migrated legacy key."""
+def test_purge_removes_the_world_readable_config_root_copies(tmp_path) -> None:
     (tmp_path / "frigidaire.json").write_text("{}")
     (tmp_path / "frigidaire-e1.json").write_text("{}")
-    # e2 has no file yet, but legacy may now hold e1's staged key — still, e2 with no
-    # per-entry file falls back to legacy only because it has never been set up.
-    # This documents that migration is one-shot per entry via the per-entry file.
-    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e2") == str(tmp_path / "frigidaire.json")
-    (tmp_path / "frigidaire-e2.json").write_text("{}")
-    assert auth_store.resolve_initial_auth_path(str(tmp_path), "e2") == str(tmp_path / "frigidaire-e2.json")
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire-e1.json").write_text("{}")
+
+    auth_store.purge_legacy_auth(str(tmp_path), "e1")
+
+    assert not (tmp_path / "frigidaire.json").exists()
+    assert not (tmp_path / "frigidaire-e1.json").exists()
+    assert (tmp_path / ".storage" / "frigidaire-e1.json").exists()
+
+
+def test_purge_is_a_no_op_when_there_is_nothing_to_remove(tmp_path) -> None:
+    auth_store.purge_legacy_auth(str(tmp_path), "e1")

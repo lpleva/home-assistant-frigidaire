@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import voluptuous as vol
@@ -12,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .auth_store import AUTH_FILE, load_auth, save_auth
+from .auth_store import load_auth, save_auth, shared_auth_path
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -58,7 +57,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> list[frig
     """Validate credentials and return list of appliances."""
 
     def setup(username: str, password: str) -> list[frigidaire.Appliance]:
-        auth_path = os.path.join(hass.config.path(), AUTH_FILE)
+        # Staged under .storage until the entry exists and gets its own file.
+        auth_path = shared_auth_path(hass.config.path())
 
         try:
             session_key, regional_base_url = load_auth(auth_path)
