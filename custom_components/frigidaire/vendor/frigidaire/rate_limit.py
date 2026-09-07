@@ -14,6 +14,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 RL_DEFAULT_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+# Used when a caller passes no timeout at all, so "no timeout" is not reachable.
+FALLBACK_TIMEOUT: float = 15.0
 TimeoutType = float | tuple[float, float]  # requests supports float or (connect, read)
 
 
@@ -65,11 +67,21 @@ def wrap_session_request(
 
     def _wrapped(method: str, url: str, **kwargs):
         m = (method or "").upper()
+
+        # The account password crosses one of these connections. Certificate verification
+        # is not optional here, so a caller cannot switch it off through a keyword
+        # argument the way this library used to do on every request.
+        verify = kwargs.get("verify", True)
+        if verify is False or verify is None or verify == "":
+            raise ValueError("TLS certificate verification cannot be disabled for Frigidaire requests")
+
         if m in methods:
             limiter.wait()
 
-        if default_timeout is not None and "timeout" not in kwargs:
-            kwargs["timeout"] = default_timeout
+        # Every request carries a timeout: a hung endpoint would otherwise pin the calling
+        # thread forever, and in Home Assistant that thread belongs to a shared executor.
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = default_timeout if default_timeout is not None else FALLBACK_TIMEOUT
 
         retries = 0
         backoff = 1.0

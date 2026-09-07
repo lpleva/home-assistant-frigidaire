@@ -4,15 +4,15 @@ import gzip
 import json
 import logging
 import random
+import re
 import threading
 import time
 from collections.abc import Callable
 from enum import Enum
 from typing import NoReturn, Optional, TypeVar, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import requests
-import urllib3
 from requests import Response
 
 from .rate_limit import RateLimiter, wrap_session_request
@@ -20,11 +20,73 @@ from .signature_generator import get_signature
 
 T = TypeVar("T")
 
-# Frigidaire uses a self-signed certificate, which forces us to disable SSL verification
-# To keep our logs free of spam, we disable warnings on insecure requests
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+_LOGGER = logging.getLogger(__name__)
 
 GLOBAL_API_URL = "https://api.ocp.electrolux.one"
+
+# Hosts this client may talk to. Two of the three hosts it uses are not constants:
+# the Gigya identity domain and the regional API base URL both arrive inside a cloud
+# response, and the credential POST goes to the identity domain. Without an allowlist,
+# anyone able to tamper with that response could point the POST carrying the account
+# email and password at a host of their choosing.
+_ALLOWED_IDENTITY_DOMAIN_SUFFIXES = (".gigya.com", ".electrolux.one", ".electrolux.com")
+_ALLOWED_API_HOST_SUFFIXES = (".electrolux.one", ".electrolux.com")
+
+# A DNS hostname and nothing else: no scheme, no port, no path, no credentials. Checking
+# the shape matters as much as the suffix, because these values are interpolated straight
+# into a URL — "evil.example/x.gigya.com" ends with an allowed suffix but resolves to
+# evil.example.
+_HOSTNAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$")
+
+
+def _is_allowed_host(host: str, allowed_suffixes: tuple[str, ...]) -> bool:
+    """Whether ``host`` is a well-formed hostname inside one of the allowed domains."""
+    if not isinstance(host, str):
+        return False
+    candidate = host.strip().rstrip(".").lower()
+    if not _HOSTNAME_RE.match(candidate):
+        return False
+    return any(candidate == suffix.lstrip(".") or candidate.endswith(suffix) for suffix in allowed_suffixes)
+
+
+def _validate_identity_domain(domain: str) -> str:
+    """Return the Gigya identity domain, or refuse to send credentials to it."""
+    if not _is_allowed_host(domain, _ALLOWED_IDENTITY_DOMAIN_SUFFIXES):
+        raise FrigidaireException(
+            f"Refusing to send credentials to unexpected identity domain {domain!r}; "
+            f"expected a host under {', '.join(_ALLOWED_IDENTITY_DOMAIN_SUFFIXES)}"
+        )
+    return domain
+
+
+def _validate_api_base_url(base_url: str) -> str:
+    """Return the regional API base URL, or reject it as a place to send the bearer token."""
+    parsed = urlparse(base_url or "")
+    if parsed.scheme != "https" or parsed.username or parsed.password or parsed.path.strip("/"):
+        raise FrigidaireException(f"Unexpected Frigidaire API base URL {base_url!r}")
+    if parsed.port is not None and parsed.port != 443:
+        raise FrigidaireException(f"Unexpected Frigidaire API base URL {base_url!r}")
+    if not _is_allowed_host(parsed.hostname or "", _ALLOWED_API_HOST_SUFFIXES):
+        raise FrigidaireException(
+            f"Refusing to use unexpected Frigidaire API host {parsed.hostname!r}; "
+            f"expected a host under {', '.join(_ALLOWED_API_HOST_SUFFIXES)}"
+        )
+    return base_url.rstrip("/")
+
+
+def _validate_request_url(url: str) -> str:
+    """Last check before a request leaves: https, on a host this client is allowed to use.
+
+    The base URL is validated where it is read, but it also comes back from the caller
+    (Home Assistant persists it between restarts), so every request is re-checked rather
+    than trusting that path.
+    """
+    parsed = urlparse(url)
+    allowed = _ALLOWED_IDENTITY_DOMAIN_SUFFIXES + _ALLOWED_API_HOST_SUFFIXES
+    if parsed.scheme != "https" or not _is_allowed_host(parsed.hostname or "", allowed):
+        raise FrigidaireException(f"Refusing to make a request to unexpected URL {url!r}")
+    return url
+
 
 FRIGIDAIRE_API_KEY = "3BAfxFtCTdGbJ74udWvSe6ZdPugP8GcKz3nSJVfg"
 CLIENT_SECRET = (
@@ -431,7 +493,8 @@ class Frigidaire:
         :param password: The password to log in to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
-        :param timeout: Per-request HTTP timeout in seconds (default 15.0). None disables the default.
+        :param timeout: Per-request HTTP timeout in seconds (default 15.0). None falls back to
+                            rate_limit.FALLBACK_TIMEOUT; requests are never made without a timeout.
         :param regional_base_url: Regional base URL for the API user account
                             (e.g., https://api.us.ocp.electrolux.one for U.S. accounts). If not specified,
                             authentication is required
@@ -456,6 +519,18 @@ class Frigidaire:
         self.username = username
         self.password = password
         self.session_key: str | None = session_key
+        # A cached base URL comes back from the caller's own storage, so it gets the same
+        # check as one read from a response. A bad one is dropped rather than raised on:
+        # re-authenticating recovers, and refusing to start would strand the caller with a
+        # corrupt cache file it cannot see.
+        if regional_base_url:
+            try:
+                regional_base_url = _validate_api_base_url(regional_base_url)
+            except FrigidaireException:
+                _LOGGER.warning("Ignoring cached Frigidaire base URL that is not a known Electrolux host")
+                regional_base_url = None
+                session_key = None
+                self.session_key = None
         self.regional_base_url = regional_base_url
         self.country_code = country_code
         self._session_max_retries = session_max_retries
@@ -548,9 +623,14 @@ class Frigidaire:
             f"/one-account-user/api/v1/identity-providers?brand=frigidaire&countryCode={self.country_code}",
             self.get_headers_frigidaire("GET", include_bearer_token=True),
         )
-        identity_domain = identity_providers_response[0]["domain"]
-        identity_api_key = identity_providers_response[0]["apiKey"]
-        self.regional_base_url = identity_providers_response[0]["httpRegionalBaseUrl"]
+        # These three values come out of a cloud response and decide where the account
+        # password is sent, so they are validated before they are used, not after.
+        provider = identity_providers_response[0]
+        identity_domain = _validate_identity_domain(provider.get("domain"))
+        identity_api_key = provider.get("apiKey")
+        if not isinstance(identity_api_key, str) or not identity_api_key:
+            raise FrigidaireException("Failed to authenticate: identity provider returned no apiKey")
+        self.regional_base_url = _validate_api_base_url(provider.get("httpRegionalBaseUrl"))
 
         data = {
             "apiKey": identity_api_key,
@@ -876,8 +956,13 @@ class Frigidaire:
         :param headers: Headers to include in the request
         :return: The contents of 'data' in the resulting json
         """
+        # Validated outside the try so the refusal reaches the caller as itself rather
+        # than as a generic request failure.
+        full_url = _validate_request_url(f"{url}{path}")
         try:
-            response = self._session.get(f"{url}{path}", headers=headers, verify=False)
+            # No verify= argument anywhere in this class: requests validates the
+            # certificate chain and hostname against the system trust store.
+            response = self._session.get(full_url, headers=headers)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "GET", f"{url}{path}", headers, "")
@@ -894,9 +979,10 @@ class Frigidaire:
         :param form_encoding: Whether to form-encode data. If false, encodes as json
         :return: The contents of 'data' in the resulting json
         """
+        full_url = _validate_request_url(f"{url}{path}")
         try:
             encoded_data = urlencode(data) if form_encoding else json.dumps(data)
-            response = self._session.post(f"{url}{path}", data=encoded_data, headers=headers, verify=False)
+            response = self._session.post(full_url, data=encoded_data, headers=headers)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "POST", f"{url}{path}", headers, json.dumps(data))
@@ -911,8 +997,9 @@ class Frigidaire:
         :return: The contents of 'data' in the resulting json
         """
         encoded_data = json.dumps(data)
+        full_url = _validate_request_url(f"{url}{path}")
         try:
-            response = self._session.put(f"{url}{path}", data=encoded_data, headers=headers, verify=False)
+            response = self._session.put(full_url, data=encoded_data, headers=headers)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "PUT", f"{url}{path}", headers, encoded_data)
