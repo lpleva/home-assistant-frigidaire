@@ -113,18 +113,38 @@ def resolve_initial_auth_path(config_dir: str, entry_id: str) -> str:
     return per_entry
 
 
-def purge_legacy_auth(config_dir: str, entry_id: str) -> None:
-    """Delete pre-0.2.0 auth files from the config root once the key has been migrated.
+def remove_auth(config_dir: str, entry_id: str) -> None:
+    """Delete an entry's session file. Called when the config entry itself is removed.
 
-    They are world-readable and sit next to configuration.yaml, which is the exposure this
-    move fixes; leaving them behind would leave the token where it always was.
+    The key stays valid server-side for a long time after the entry is gone, so leaving
+    the file behind leaves a live token in .storage (and in every backup) belonging to an
+    integration the user has deleted.
     """
-    for path in legacy_auth_paths(config_dir, entry_id):
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            continue
-        except OSError as err:
-            _LOGGER.warning("Could not remove the legacy Frigidaire session file %s: %s", path, err)
-        else:
-            _LOGGER.debug("Removed legacy Frigidaire session file %s", path)
+    _unlink(per_entry_auth_path(config_dir, entry_id))
+
+
+def purge_legacy_auth(config_dir: str, entry_id: str) -> None:
+    """Delete auth files this entry no longer reads, once its own file exists.
+
+    The pre-0.2.0 files are world-readable and sit next to configuration.yaml, which is the
+    exposure the move to .storage fixes; leaving them behind would leave the token where it
+    always was. The staged shared file goes too: it is the config flow's handoff to setup,
+    and once the entry has its own copy it is a second live token nothing reads.
+    """
+    stale = list(legacy_auth_paths(config_dir, entry_id))
+    if os.path.exists(per_entry_auth_path(config_dir, entry_id)):
+        stale.append(shared_auth_path(config_dir))
+    for path in stale:
+        _unlink(path)
+
+
+def _unlink(path: str) -> None:
+    """Remove a session file, tolerating one that is already gone."""
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return
+    except OSError as err:
+        _LOGGER.warning("Could not remove the Frigidaire session file %s: %s", path, err)
+    else:
+        _LOGGER.debug("Removed Frigidaire session file %s", path)

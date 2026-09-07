@@ -10,7 +10,14 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
-from .auth_store import load_auth, per_entry_auth_path, purge_legacy_auth, resolve_initial_auth_path, save_auth
+from .auth_store import (
+    load_auth,
+    per_entry_auth_path,
+    purge_legacy_auth,
+    remove_auth,
+    resolve_initial_auth_path,
+    save_auth,
+)
 from .const import DOMAIN, PLATFORMS
 from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
 from .helpers import is_auth_failure
@@ -132,6 +139,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when options change so switch selection takes effect."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the entry's session key when the entry itself is deleted.
+
+    The key outlives the entry server-side, so leaving the file behind leaves a live token
+    in .storage — and in every backup — for an integration the user has removed.
+    """
+    await hass.async_add_executor_job(remove_auth, hass.config.path(), entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

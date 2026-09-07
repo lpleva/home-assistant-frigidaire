@@ -175,3 +175,15 @@ async def test_an_unexpected_setup_failure_is_logged_with_its_traceback(
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert "Unexpected error setting up Frigidaire" in caplog.text
     assert "TypeError: something in here is broken" in caplog.text
+
+
+async def test_removing_the_entry_deletes_its_session_key(hass: HomeAssistant, setup_entry, tmp_path) -> None:
+    """The token outlives the entry server-side, so the file must not outlive the entry."""
+    entry, _stub = await setup_entry([LEGACY_AC])
+    path = tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json"
+    assert path.is_file()
+
+    assert await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not path.exists()

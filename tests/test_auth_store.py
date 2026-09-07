@@ -95,3 +95,40 @@ def test_purge_removes_the_world_readable_config_root_copies(tmp_path) -> None:
 
 def test_purge_is_a_no_op_when_there_is_nothing_to_remove(tmp_path) -> None:
     auth_store.purge_legacy_auth(str(tmp_path), "e1")
+
+
+def test_purge_also_removes_the_staged_shared_file_once_the_entry_has_its_own(tmp_path) -> None:
+    """The staged file is the flow's handoff to setup; after that it is a second live token."""
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire.json").write_text("{}")
+    (tmp_path / ".storage" / "frigidaire-e1.json").write_text("{}")
+
+    auth_store.purge_legacy_auth(str(tmp_path), "e1")
+
+    assert not (tmp_path / ".storage" / "frigidaire.json").exists()
+    assert (tmp_path / ".storage" / "frigidaire-e1.json").exists()
+
+
+def test_purge_keeps_the_staged_file_when_the_entry_has_no_file_yet(tmp_path) -> None:
+    """Setup failed before writing its own copy; the staged key is still the only one."""
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire.json").write_text("{}")
+
+    auth_store.purge_legacy_auth(str(tmp_path), "e1")
+
+    assert (tmp_path / ".storage" / "frigidaire.json").exists()
+
+
+def test_remove_auth_deletes_only_that_entrys_file(tmp_path) -> None:
+    (tmp_path / ".storage").mkdir()
+    (tmp_path / ".storage" / "frigidaire-e1.json").write_text("{}")
+    (tmp_path / ".storage" / "frigidaire-e2.json").write_text("{}")
+
+    auth_store.remove_auth(str(tmp_path), "e1")
+
+    assert not (tmp_path / ".storage" / "frigidaire-e1.json").exists()
+    assert (tmp_path / ".storage" / "frigidaire-e2.json").exists()
+
+
+def test_remove_auth_is_a_no_op_when_the_file_is_already_gone(tmp_path) -> None:
+    auth_store.remove_auth(str(tmp_path), "e1")
