@@ -79,9 +79,7 @@ BASE_MODES = [MODE_NORMAL, MODE_BOOST, MODE_AUTO, MODE_SLEEP]
 # Modes in which the appliance works towards the target humidity. CONTINUOUS runs
 # regardless of the setpoint and FANONLY does not dehumidify at all, so those are the
 # only two set_humidity has to switch away from.
-SETPOINT_MODES = frozenset(
-    {frigidaire.Mode.DRY, frigidaire.Mode.AUTO, frigidaire.Mode.SMART, frigidaire.Mode.QUIET}
-)
+SETPOINT_MODES = frozenset({frigidaire.Mode.DRY, frigidaire.Mode.AUTO, frigidaire.Mode.SMART, frigidaire.Mode.QUIET})
 
 FRIGIDAIRE_TO_HA_FAN_MODE = {
     frigidaire.FanSpeed.LOW: FAN_LOW,

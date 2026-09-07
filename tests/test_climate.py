@@ -129,9 +129,7 @@ async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant
     assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
 
 
-async def test_a_missing_temperature_representation_does_not_break_the_entity(
-    hass: HomeAssistant, setup_entry
-) -> None:
+async def test_a_missing_temperature_representation_does_not_break_the_entity(hass: HomeAssistant, setup_entry) -> None:
     """temperature_unit is read on every state write, so it must never raise."""
     record = copy.deepcopy(LEGACY_AC)
     del record["properties"]["reported"]["temperatureRepresentation"]

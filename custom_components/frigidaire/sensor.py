@@ -38,7 +38,6 @@ from .parsers import (
 )
 from .vendor import frigidaire
 
-
 FRIGIDAIRE_TO_HA_UNIT = {
     frigidaire.Unit.FAHRENHEIT: UnitOfTemperature.FAHRENHEIT,
     frigidaire.Unit.CELSIUS: UnitOfTemperature.CELSIUS,

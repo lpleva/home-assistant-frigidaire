@@ -19,9 +19,7 @@ def sent(stub, setting: frigidaire.Setting) -> list:
 
 
 async def call(hass: HomeAssistant, service: str, **data) -> None:
-    await hass.services.async_call(
-        "humidifier", service, {"entity_id": humidifier_id(hass), **data}, blocking=True
-    )
+    await hass.services.async_call("humidifier", service, {"entity_id": humidifier_id(hass), **data}, blocking=True)
     await hass.async_block_till_done(wait_background_tasks=True)
 
 

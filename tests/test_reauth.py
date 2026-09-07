@@ -24,9 +24,7 @@ def _reauth_flows(hass: HomeAssistant) -> list[dict]:
     return [flow for flow in hass.config_entries.flow.async_progress() if flow["context"]["source"] == SOURCE_REAUTH]
 
 
-async def test_invalid_credentials_at_setup_start_a_reauth_flow(
-    hass: HomeAssistant, frigidaire_stub, tmp_path
-) -> None:
+async def test_invalid_credentials_at_setup_start_a_reauth_flow(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
     stub.appliances_error = INVALID_CREDENTIALS
@@ -51,9 +49,7 @@ async def test_invalid_credentials_during_a_poll_start_a_reauth_flow(hass: HomeA
     assert len(_reauth_flows(hass)) == 1
 
 
-async def test_a_transient_failure_during_a_poll_does_not_start_a_reauth_flow(
-    hass: HomeAssistant, setup_entry
-) -> None:
+async def test_a_transient_failure_during_a_poll_does_not_start_a_reauth_flow(hass: HomeAssistant, setup_entry) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
     stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=503)
 

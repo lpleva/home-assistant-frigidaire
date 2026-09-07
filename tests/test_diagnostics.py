@@ -35,9 +35,7 @@ async def test_diagnostics_redact_the_account_and_the_hardware_ids(hass: HomeAss
     assert "secret" not in dumped
 
 
-async def test_diagnostics_redact_identifiers_nested_in_reported_properties(
-    hass: HomeAssistant, setup_entry
-) -> None:
+async def test_diagnostics_redact_identifiers_nested_in_reported_properties(hass: HomeAssistant, setup_entry) -> None:
     record = json.loads(json.dumps(LEGACY_AC))
     record["properties"]["reported"]["serialNumber"] = "SERIAL-12345"
     entry, _stub = await setup_entry([record])

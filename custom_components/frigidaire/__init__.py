@@ -92,9 +92,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # The session key is the credential now; if it ever stops working, the reauth flow
         # asks for the password again. Done before the update listener is registered, so
         # this does not bounce the entry through a reload.
-        hass.config_entries.async_update_entry(
-            entry, data={k: v for k, v in entry.data.items() if k != CONF_PASSWORD}
-        )
+        hass.config_entries.async_update_entry(entry, data={k: v for k, v in entry.data.items() if k != CONF_PASSWORD})
 
     # One request per poll cycle for the whole account: the account coordinator is the
     # only thing that polls, and it pushes each appliance's record to that appliance's

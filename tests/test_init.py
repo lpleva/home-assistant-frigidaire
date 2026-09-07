@@ -121,9 +121,7 @@ async def test_session_key_is_written_owner_only_under_storage(hass: HomeAssista
     assert not (tmp_path / f"frigidaire-{entry.entry_id}.json").exists()
 
 
-async def test_a_pre_020_session_file_is_migrated_and_removed(
-    hass: HomeAssistant, frigidaire_stub, tmp_path
-) -> None:
+async def test_a_pre_020_session_file_is_migrated_and_removed(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
     """An existing user keeps their cached session instead of minting a new one (cas_3403)."""
     hass.config.config_dir = str(tmp_path)
     (tmp_path / "frigidaire.json").write_text(
@@ -155,9 +153,7 @@ async def test_entity_ids_and_names_carry_the_device(hass: HomeAssistant, setup_
     assert "binary_sensor.basement_dehumidifier_connectivity" in entity_ids
     assert not any(entity_id.endswith("_2") for entity_id in entity_ids)
     # The primary entity keeps the device's own name rather than repeating it.
-    assert hass.states.get("humidifier.basement_dehumidifier").attributes["friendly_name"] == (
-        "Basement Dehumidifier"
-    )
+    assert hass.states.get("humidifier.basement_dehumidifier").attributes["friendly_name"] == ("Basement Dehumidifier")
     assert hass.states.get("binary_sensor.bedroom_ac_connectivity").attributes["friendly_name"] == (
         "Bedroom AC Connectivity"
     )

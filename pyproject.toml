@@ -1,6 +1,9 @@
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# Vendored third-party source. Kept as close to upstream as possible so the security
+# patches listed in vendor/frigidaire/VENDORED.md stay easy to re-apply on a new release.
+extend-exclude = ["custom_components/frigidaire/vendor"]
 
 [tool.ruff.lint]
 select = [

@@ -17,7 +17,6 @@ from .coordinator import FrigidaireApplianceCoordinator
 from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 
-
 STEP_SECONDS = 1800  # 30 minutes
 MAX_SECONDS = 86400  # 24 hours
 OPTIMISTIC_WINDOW = 5  # seconds to hold optimistic state after a command
