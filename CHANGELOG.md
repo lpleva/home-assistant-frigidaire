@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Config flow: mark username and password as required in the form schema, so an empty password is refused by the form instead of crashing validation with a KeyError ("Could not parse the Frigidaire appliance list: 'password'").
+
 ## 0.2.0 — 2026-09-07
 
 A security and correctness release answering a full audit of the integration and the

@@ -1,3 +1,4 @@
+import pytest
 """The user config flow: credentials are checked, and only the username is kept."""
 
 import json
@@ -117,3 +118,13 @@ async def test_a_malformed_appliance_list_is_reported_without_a_traceback(
 
     assert result["errors"] == {"base": "unknown"}
     assert "Could not parse the Frigidaire appliance list" in caplog.text
+
+
+def test_user_schema_requires_both_fields() -> None:
+    """An empty password must be rejected by the schema, not crash validate_input."""
+    import voluptuous as vol
+    from custom_components.frigidaire.config_flow import STEP_USER_DATA_SCHEMA
+
+    with pytest.raises(vol.Invalid):
+        STEP_USER_DATA_SCHEMA({"username": "a@b.c"})
+    assert STEP_USER_DATA_SCHEMA({"username": "a@b.c", "password": "x"}) == {"username": "a@b.c", "password": "x"}

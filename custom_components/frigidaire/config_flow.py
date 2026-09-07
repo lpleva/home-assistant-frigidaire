@@ -31,7 +31,10 @@ from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
+# vol.Required: a plain-key Schema makes its keys optional, so an empty password field
+# reached validate_input as a missing key and surfaced as "unknown" (KeyError) instead of
+# the form refusing to submit (seen 2026-09-07 on first install).
+STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_USERNAME): str, vol.Required(CONF_PASSWORD): str})
 
 ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS, **SENSOR_OPTIONS}
 
