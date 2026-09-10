@@ -117,7 +117,9 @@ async def test_session_key_is_written_owner_only_under_storage(hass: HomeAssista
     path = tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json"
     assert path.is_file()
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
-    assert json.loads(path.read_text())["session_key"] == "stub-session-key"
+    stored = json.loads(path.read_text())
+    assert stored["session_key"] == "stub-session-key"
+    assert stored["refresh_token"] == "stub-refresh-token"
     assert not (tmp_path / f"frigidaire-{entry.entry_id}.json").exists()
 
 
@@ -138,6 +140,7 @@ async def test_a_pre_020_session_file_is_migrated_and_removed(hass: HomeAssistan
         await hass.async_block_till_done(wait_background_tasks=True)
 
     assert client_cls.call_args.kwargs["session_key"] == "old-key"
+    assert client_cls.call_args.kwargs["refresh_token"] is None  # pre-refresh-token file
     assert not (tmp_path / "frigidaire.json").exists()
     assert (tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json").is_file()
 

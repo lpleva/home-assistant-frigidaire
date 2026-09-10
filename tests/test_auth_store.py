@@ -9,8 +9,14 @@ import auth_store
 
 def test_save_then_load_round_trips(tmp_path) -> None:
     path = str(tmp_path / ".storage" / "frigidaire-abc.json")
-    auth_store.save_auth(path, "the-key", "https://api.us.example")
-    assert auth_store.load_auth(path) == ("the-key", "https://api.us.example")
+    auth_store.save_auth(path, "the-key", "https://api.us.example", "the-refresh")
+    assert auth_store.load_auth(path) == ("the-key", "https://api.us.example", "the-refresh")
+
+
+def test_a_file_from_before_refresh_tokens_loads_with_none(tmp_path) -> None:
+    path = tmp_path / "frigidaire-abc.json"
+    path.write_text(json.dumps({"session_key": "old", "regional_base_url": "https://api.us.example"}))
+    assert auth_store.load_auth(str(path)) == ("old", "https://api.us.example", None)
 
 
 def test_saved_file_is_owner_only(tmp_path) -> None:
@@ -30,14 +36,14 @@ def test_save_leaves_no_temporary_files_behind(tmp_path) -> None:
 
 def test_load_missing_file_returns_none_pair_and_creates_nothing(tmp_path) -> None:
     missing = tmp_path / "does-not-exist.json"
-    assert auth_store.load_auth(str(missing)) == (None, None)
+    assert auth_store.load_auth(str(missing)) == (None, None, None)
     assert not missing.exists()
 
 
 def test_load_ignores_a_corrupt_file(tmp_path) -> None:
     path = tmp_path / "frigidaire-abc.json"
     path.write_text("{not json")
-    assert auth_store.load_auth(str(path)) == (None, None)
+    assert auth_store.load_auth(str(path)) == (None, None, None)
 
 
 def test_per_entry_auth_path_is_scoped_by_entry_id_and_lives_in_storage(tmp_path) -> None:

@@ -1,10 +1,11 @@
-"""Persistence for the Frigidaire session key.
+"""Persistence for the Frigidaire session key and its refresh token.
 
 Kept free of Home Assistant imports so the persistence + migration logic can be
 unit-tested without a full HA environment.
 
-The session key is a long-lived bearer token: on its own it is enough to drive the
-appliance, and no password change revokes it. So it is written owner-only (0600), atomically,
+The session key is a bearer token good for 12 hours; the refresh token stored beside it
+lets the client mint the next one without the password. Either is enough to drive the
+appliance, and no password change revokes them. So it is written owner-only (0600), atomically,
 and inside ``.storage/`` rather than next to ``configuration.yaml`` — the config root is the
 directory people zip up and paste into forum threads. It is still inside the Home Assistant
 backup, which is unavoidable for a token that has to survive a restart; the file permissions
@@ -31,27 +32,29 @@ AUTH_FILE = "frigidaire.json"
 STORAGE_SUBDIR = ".storage"
 
 
-def load_auth(auth_path: str) -> tuple[str | None, str | None]:
-    """Read a stored session key; a missing, empty or unreadable file means no cached session.
+def load_auth(auth_path: str) -> tuple[str | None, str | None, str | None]:
+    """Read a stored (session key, regional base url, refresh token); a missing, empty or
+    unreadable file means no cached session. Files written before the refresh token was
+    kept simply have no third value.
 
     Reading never creates the file. The previous version did, which is why it also needed a
     zero-length guard.
     """
     if not os.path.exists(auth_path) or os.path.getsize(auth_path) == 0:
-        return None, None
+        return None, None, None
     try:
         with open(auth_path) as f:
             obj: dict = json.load(f)
     except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         _LOGGER.warning("Ignoring unreadable Frigidaire session file %s", auth_path)
-        return None, None
+        return None, None, None
     if not isinstance(obj, dict):
-        return None, None
-    return obj.get("session_key"), obj.get("regional_base_url")
+        return None, None, None
+    return obj.get("session_key"), obj.get("regional_base_url"), obj.get("refresh_token")
 
 
-def save_auth(auth_path: str, session_key: str, regional_base_url: str | None) -> None:
-    """Write the session key atomically, readable only by the owner."""
+def save_auth(auth_path: str, session_key: str, regional_base_url: str | None, refresh_token: str | None = None) -> None:
+    """Write the session key (and refresh token) atomically, readable only by the owner."""
     directory = os.path.dirname(auth_path) or "."
     os.makedirs(directory, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".frigidaire-", suffix=".tmp")
@@ -59,7 +62,7 @@ def save_auth(auth_path: str, session_key: str, regional_base_url: str | None) -
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(
-                {"session_key": session_key, "regional_base_url": regional_base_url},
+                {"session_key": session_key, "regional_base_url": regional_base_url, "refresh_token": refresh_token},
                 f,
                 ensure_ascii=False,
                 indent=4,

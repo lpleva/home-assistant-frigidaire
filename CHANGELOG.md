@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Session keys turn out to live 12 hours, not "a long time", so the no-password design of 0.2.0 asked for the password twice a day. The client now keeps the refresh token Electrolux issues with each session key (stored beside it, owner-only) and uses it to mint the next key itself, the way Electrolux's own app does; the reauth prompt is only for a refresh Electrolux refuses. Auth files from before this load with no refresh token and get one on the next login. Three tests.
+
 ## 0.2.1
 
 - Config flow: mark username and password as required in the form schema, so an empty password is refused by the form instead of crashing validation with a KeyError ("Could not parse the Frigidaire appliance list: 'password'").

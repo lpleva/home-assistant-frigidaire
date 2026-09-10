@@ -53,6 +53,7 @@ class StubFrigidaire:
     def __init__(self, records: list[dict]) -> None:
         # Real strings, not MagicMocks: the integration persists these to its auth file.
         self.session_key = "stub-session-key"
+        self.refresh_token = "stub-refresh-token"
         self.regional_base_url = "https://api.us.ocp.electrolux.one"
         self.records: dict[str, dict] = {r["applianceId"]: copy.deepcopy(r) for r in records}
         self.commands: list[tuple[str, object]] = []

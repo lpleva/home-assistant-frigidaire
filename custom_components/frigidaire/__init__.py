@@ -62,18 +62,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # clobber each other's session keys (which would force re-auth and trip cas_3403).
         auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
 
-        def persist_session_key(session_key: str, regional_base_url: str | None) -> None:
-            # Called whenever the client mints a new session key, including on
-            # runtime re-authentication. Persisting it means a still-valid token
-            # survives restarts instead of being abandoned — abandoned sessions
-            # linger server-side and trip Frigidaire's active-session cap (cas_3403).
+        def persist_session_key(session_key: str, regional_base_url: str | None, refresh_token: str | None = None) -> None:
+            # Called whenever the client mints or refreshes a session key. Persisting it
+            # (with the refresh token that mints the next one) means a still-valid token
+            # survives restarts instead of being abandoned — abandoned sessions linger
+            # server-side and trip Frigidaire's active-session cap (cas_3403).
             with _AUTH_WRITE_LOCK:
-                save_auth(auth_path, session_key, regional_base_url)
+                save_auth(auth_path, session_key, regional_base_url, refresh_token)
 
         try:
             # Fall back to the legacy shared file on first run so an existing
             # cached key is migrated instead of forcing a re-auth.
-            session_key, regional_base_url = load_auth(resolve_initial_auth_path(hass.config.path(), entry.entry_id))
+            session_key, regional_base_url, refresh_token = load_auth(
+                resolve_initial_auth_path(hass.config.path(), entry.entry_id)
+            )
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
@@ -83,10 +85,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 timeout=30,
                 session_key=session_key,
                 regional_base_url=regional_base_url,
+                refresh_token=refresh_token,
                 on_session_key_update=persist_session_key,
                 session_max_retries=1,
             )
-            persist_session_key(client.session_key, client.regional_base_url)
+            persist_session_key(client.session_key, client.regional_base_url, getattr(client, "refresh_token", None))
             # The key now lives in .storage with 0600; drop the world-readable copies the
             # older versions left in the config root, where every backup picked them up.
             purge_legacy_auth(hass.config.path(), entry.entry_id)

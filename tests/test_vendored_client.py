@@ -433,3 +433,65 @@ def test_a_retried_command_carries_the_new_session_key() -> None:
 
     assert seen[0] == "Bearer cached-key"
     assert seen[-1] == "Bearer fresh-session-key"
+
+
+def _body(call) -> dict:
+    kwargs = call[2]
+    if kwargs.get("json") is not None:
+        return kwargs["json"]
+    raw = kwargs.get("data")
+    return json.loads(raw) if isinstance(raw, (str, bytes)) else dict(raw or {})
+
+
+def test_a_dead_session_is_refreshed_without_the_password() -> None:
+    """Session keys live 12 hours; the refresh token mints the next one, no password involved."""
+    updates: list[tuple] = []
+    client = _client()
+    client._on_session_key_update = lambda key, url, refresh: updates.append((key, url, refresh))
+    client.password = None
+    client.refresh_token = "old-refresh"
+    session = RecordingSession([
+        FakeResponse({"error": "expired"}, status_code=401),  # test_connection on the dead key
+        FakeResponse({"accessToken": "new-key", "refreshToken": "new-refresh", "expiresIn": 43200, "tokenType": "Bearer"}),
+    ])
+    client._session = session
+
+    client.authenticate()
+
+    assert client.session_key == "new-key"
+    assert client.refresh_token == "new-refresh"
+    assert updates[-1] == ("new-key", "https://api.us.ocp.electrolux.one", "new-refresh")
+    assert [m for m, _, _ in session.calls] == ["GET", "POST"]
+    assert session.calls[1][1].endswith("/one-account-authorization/api/v1/token")
+    body = _body(session.calls[1])
+    assert body["grantType"] == "refresh_token"
+    assert body["refreshToken"] == "old-refresh"
+    assert "password" not in json.dumps(body).lower()
+
+
+def test_a_refused_refresh_token_falls_back_to_asking_for_reauth() -> None:
+    client = _client()
+    client.password = None
+    client.refresh_token = "stale-refresh"
+    client._session = RecordingSession([
+        FakeResponse({"error": "expired"}, status_code=401),
+        FakeResponse({"error": "invalid_grant"}, status_code=401),
+    ])
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.authenticate()
+
+    assert excinfo.value.error_code == "reauth_required"
+    assert client.refresh_token is None  # a refused token is not retried forever
+
+
+def test_a_still_valid_session_is_not_refreshed() -> None:
+    client = _client()
+    client.refresh_token = "keep-me"
+    session = RecordingSession([FakeResponse({"userId": "u1"})])
+    client._session = session
+
+    client.authenticate()
+
+    assert [m for m, _, _ in session.calls] == ["GET"]
+    assert client.refresh_token == "keep-me"

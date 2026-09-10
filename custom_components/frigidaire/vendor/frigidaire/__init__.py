@@ -503,6 +503,7 @@ class Frigidaire:
         regional_base_url: str | None = None,
         country_code: str = "US",
         *,
+        refresh_token: str | None = None,
         rate_limit_min_interval: float = 1.25,
         rate_limit_jitter: float = 0.25,
         rate_limit_methods: frozenset[str] | set[str] | None = None,
@@ -511,7 +512,7 @@ class Frigidaire:
         max_retry_after: float = 60.0,
         session_max_retries: int = 2,
         session_retry_backoff: float = 0.0,
-        on_session_key_update: Callable[[str, str | None], None] | None = None,
+        on_session_key_update: Callable[[str, str | None, str | None], None] | None = None,
     ):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
@@ -522,6 +523,9 @@ class Frigidaire:
                             error_code="reauth_required" rather than attempting a login.
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
+        :param refresh_token: The refresh token Electrolux issued with that session key. Session keys
+                            live 12 hours; with the refresh token the client mints the next one itself,
+                            without the password. Without it, a dead session means reauth_required.
         :param timeout: Per-request HTTP timeout in seconds (default 15.0). None falls back to
                             rate_limit.FALLBACK_TIMEOUT; requests are never made without a timeout.
         :param regional_base_url: Regional base URL for the API user account
@@ -540,14 +544,15 @@ class Frigidaire:
                             retried. 0 disables session retries entirely.
         :param session_retry_backoff: Seconds to sleep before each session retry, scaled by attempt
                             number (default 0.0 = no delay).
-        :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url)
-                            whenever a new session key is minted. Lets callers persist the key so it
+        :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url,
+                            refresh_token) whenever a new session key is minted or refreshed. Lets callers persist the key so it
                             survives restarts instead of abandoning a still-valid token and minting a
                             new server-side session (which Electrolux caps via cas_3403).
         """
         self.username = username
         self.password = password
         self.session_key: str | None = session_key
+        self.refresh_token: str | None = refresh_token
         # A cached base URL comes back from the caller's own storage, so it gets the same
         # check as one read from a response. A bad one is dropped rather than raised on:
         # re-authenticating recovers, and refusing to start would strand the caller with a
@@ -642,10 +647,17 @@ class Frigidaire:
                 _LOGGER.debug("Session key is invalid, re-authenticating")
                 self.session_key = None
 
+        if self.refresh_token and self.regional_base_url:
+            # Session keys last 12 hours. The refresh token Electrolux issued with the last
+            # one mints the next without the password, which Home Assistant does not keep.
+            if self._refresh_session():
+                return None
+
         if not self.password:
             # The caller holds no password (Home Assistant keeps it out of the config
-            # entry once a session key exists), so a full login is impossible. Say so
-            # structurally instead of POSTing an empty password to Gigya.
+            # entry once a session key exists) and no working refresh token, so a full
+            # login is impossible. Say so structurally instead of POSTing an empty
+            # password to Gigya.
             raise FrigidaireException(
                 "Session expired and no password is held; the account must be re-authenticated",
                 status_code=401,
@@ -790,7 +802,41 @@ class Frigidaire:
 
         _LOGGER.debug("Authentication successful, storing new session key")
         self.session_key = access_token
+        self.refresh_token = frigidaire_auth_response.get("refreshToken") or None
         self._emit_session_key_update()
+
+    def _refresh_session(self) -> bool:
+        """Mint a new session key from the refresh token, without the password.
+
+        Same endpoint as the login's final token exchange, grantType refresh_token
+        (the shape Electrolux's own app uses). Electrolux rotates the refresh token on
+        each use, so the new one is stored and persisted with the new session key.
+        Returns False, and drops the refresh token, when Electrolux refuses it: the
+        caller then falls back to a password login or to asking for one.
+        """
+        assert self.refresh_token is not None
+        data = {"grantType": "refresh_token", "clientId": CLIENT_ID, "refreshToken": self.refresh_token, "scope": ""}
+        try:
+            response = self._post_dict(
+                self.regional_base_url,
+                "/one-account-authorization/api/v1/token",
+                self.get_headers_frigidaire("POST", include_bearer_token=False),
+                data,
+            )
+        except (FrigidaireException, ConnectionError) as err:
+            _LOGGER.debug("Refresh token rejected (%s); a full login is needed", getattr(err, "status_code", "?"))
+            self.refresh_token = None
+            return False
+        access_token = response.get("accessToken")
+        if not access_token:
+            _LOGGER.debug("Refresh response carried no accessToken (keys: %s)", sorted(response))
+            self.refresh_token = None
+            return False
+        _LOGGER.debug("Session refreshed, storing new session key")
+        self.session_key = access_token
+        self.refresh_token = response.get("refreshToken") or self.refresh_token
+        self._emit_session_key_update()
+        return True
 
     def _emit_session_key_update(self) -> None:
         """Notify the caller of a freshly minted session key so it can be persisted.
@@ -800,7 +846,7 @@ class Frigidaire:
         if self._on_session_key_update is None or self.session_key is None:
             return
         try:
-            self._on_session_key_update(self.session_key, self.regional_base_url)
+            self._on_session_key_update(self.session_key, self.regional_base_url, self.refresh_token)
         except Exception:
             _LOGGER.exception("on_session_key_update callback failed")
 

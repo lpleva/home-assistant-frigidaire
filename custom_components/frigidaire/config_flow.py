@@ -91,7 +91,7 @@ async def validate_input(
                 regional_base_url=None,
                 session_max_retries=1,
             )
-            save_auth(auth_path, client.session_key, client.regional_base_url)
+            save_auth(auth_path, client.session_key, client.regional_base_url, getattr(client, "refresh_token", None))
 
             return client.get_appliances()
         except frigidaire.FrigidaireException as err:
@@ -172,7 +172,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_device()
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
-        """Start reauth when the stored session (and password, if any) stops working."""
+        """Start reauth when the stored session cannot be refreshed and no password is held."""
         self._reauth_username = entry_data[CONF_USERNAME]
         return await self.async_step_reauth_confirm()
 
