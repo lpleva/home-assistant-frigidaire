@@ -194,8 +194,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 # data, not data_updates: this also drops the plaintext password an
-                # older version of the integration left in the entry.
-                return self.async_update_reload_and_abort(entry, data={CONF_USERNAME: self._reauth_username})
+                # older version of the integration left in the entry. The reload is
+                # not the flow's job: if the entry changed, the update listener in
+                # __init__ reloads it; if not, schedule one so the new session key is
+                # used. async_update_reload_and_abort would reload too, and Home
+                # Assistant 2026.12 stops doing that for entries with a listener.
+                if not self.hass.config_entries.async_update_entry(
+                    entry, data={CONF_USERNAME: self._reauth_username}
+                ):
+                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
 
         return self.async_show_form(
             step_id="reauth_confirm",

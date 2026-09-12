@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.3
+
+- Display light switch: the appliance reports and accepts `DISPLAY_LIGHT_1` / `DISPLAY_LIGHT_0`, not `ON` / `OFF`, so the switch showed the wrong state and its commands were rejected. Taken from upstream 0.1.49 (#158), with the vendored client's new `DisplayLight` enum (upstream client 0.18.54) and upstream's seven switch tests. The ionizer and child-lock switches are unchanged.
+- Re-authentication no longer reloads the entry from the config flow. Home Assistant 2026.9 warns that an integration with an update listener must let the listener schedule the reload, and 2026.12 stops reloading from the flow. The reauth step updates the entry (the listener reloads it) or, when nothing in the entry changed, schedules the reload itself.
+- Tests run on the Home Assistant 2026.9 test package (`pytest-homeassistant-custom-component` 0.13.364; the options-flow test uses `probatio` instead of the removed `voluptuous_serialize`), from upstream 0.1.50 (#165). Upstream's daily deprecation-scanning GitHub workflow (#163) was reviewed and not taken: this fork's weekly health check reads the same warnings from the running Home Assistant.
+
 ## 0.2.2
 
 - Session keys turn out to live 12 hours, not "a long time", so the no-password design of 0.2.0 asked for the password twice a day. The client now keeps the refresh token Electrolux issues with each session key (stored beside it, owner-only) and uses it to mint the next key itself, the way Electrolux's own app does; the reauth prompt is only for a refresh Electrolux refuses. Auth files from before this load with no refresh token and get one on the next login. Three tests.

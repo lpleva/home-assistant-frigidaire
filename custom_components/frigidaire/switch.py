@@ -51,8 +51,8 @@ SWITCH_DESCRIPTIONS: dict[str, SwitchDescription] = {
             name="Display Light",
             detail=Detail.DISPLAY_LIGHT,
             setting=Setting.DISPLAY_LIGHT,
-            on_value="ON",
-            off_value="OFF",
+            on_value=frigidaire.DisplayLight.ON,
+            off_value=frigidaire.DisplayLight.OFF,
             icon="mdi:lightbulb-outline",
         ),
         SwitchDescription(
@@ -131,7 +131,9 @@ class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], Switch
             if isinstance(raw, bool):
                 return raw == on_val
             return str(raw).upper() == "TRUE" if on_val else str(raw).upper() == "FALSE"
-        return normalize_enum_value(raw) == str(on_val).upper()
+        # Both sides through the same normaliser: on_val may be a str enum member,
+        # and str() of one is its qualified name, not its value (Python 3.11+).
+        return normalize_enum_value(raw) == normalize_enum_value(on_val)
 
     def turn_on(self, **kwargs: Any) -> None:
         self._client.execute_action(self._appliance, self._desc.make_action(True))

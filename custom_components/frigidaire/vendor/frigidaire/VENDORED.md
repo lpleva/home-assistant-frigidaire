@@ -1,7 +1,7 @@
 # Vendored `frigidaire` client
 
 **Upstream:** https://github.com/bm1549/frigidaire (PyPI `frigidaire`)
-**Vendored from version:** 0.18.53
+**Vendored from version:** 0.18.54 (0.18.53 on 2026-09-07; 0.18.54's only change, the `DisplayLight` enum and `Action.set_display_light`, was copied in on 2026-09-12)
 **Vendored on:** 2026-09-07
 **License:** MIT (`LICENSE`, copied from the 0.18.53 wheel).
 `signature_generator.py` is a port of https://github.com/SAP/gigya-android-sdk,

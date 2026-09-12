@@ -342,6 +342,12 @@ class Component:
         self.value = value
 
 
+class DisplayLight(str, Enum):
+    # Unlike most other on/off settings, the API rejects plain "ON"/"OFF" for displayLight.
+    ON = "DISPLAY_LIGHT_1"
+    OFF = "DISPLAY_LIGHT_0"
+
+
 class Unit(str, Enum):
     FAHRENHEIT = "FAHRENHEIT"
     CELSIUS = "CELSIUS"
@@ -412,6 +418,10 @@ class FanSpeed(str, Enum):
 
 
 class Action:
+    @classmethod
+    def set_display_light(cls, display_light: DisplayLight) -> list[Component]:
+        return [Component(Setting.DISPLAY_LIGHT, display_light)]
+
     @classmethod
     def set_power(cls, power: Power) -> list[Component]:
         return [Component(Setting.EXECUTE_COMMAND, power)]
