@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- A command Electrolux refuses (a target humidity while the unit is in Auto mode, say) now reaches the dashboard as "Dehumidifier refused the command: Request failed with status 400 (...)" instead of "Unexpected exception" with a traceback in the log. Every command the humidifier, climate and switch entities send goes through one helper; two tests.
+
 ## 0.2.3
 
 - Display light switch: the appliance reports and accepts `DISPLAY_LIGHT_1` / `DISPLAY_LIGHT_0`, not `ON` / `OFF`, so the switch showed the wrong state and its commands were rejected. Taken from upstream 0.1.49 (#158), with the vendored client's new `DisplayLight` enum (upstream client 0.18.54) and upstream's seven switch tests. The ionizer and child-lock switches are unchanged.

@@ -59,6 +59,7 @@ class StubFrigidaire:
         self.commands: list[tuple[str, object]] = []
         self.details_error: Exception | None = None
         self.appliances_error: Exception | None = None
+        self.command_error: Exception | None = None
         self.raw_fetch_count = 0
         self.closed = False
 
@@ -84,6 +85,8 @@ class StubFrigidaire:
         return [copy.deepcopy(record) for record in self.records.values()]
 
     def execute_action(self, appliance: frigidaire.Appliance, action: list[frigidaire.Component]) -> None:
+        if self.command_error is not None:
+            raise self.command_error
         self.commands.extend((component.name, component.value) for component in action)
 
     def close(self) -> None:

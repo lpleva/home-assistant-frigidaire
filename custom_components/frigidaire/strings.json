@@ -89,5 +89,10 @@
         "name": "Bucket status"
       }
     }
+  },
+  "exceptions": {
+    "command_refused": {
+      "message": "{device} refused the command: {error}"
+    }
   }
 }

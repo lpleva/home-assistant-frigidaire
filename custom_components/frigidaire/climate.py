@@ -30,7 +30,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import normalize_enum_value, suggest_area
+from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .parsers import filter_needs_attention, normalize_alerts
 from .vendor import frigidaire
 
@@ -378,10 +378,15 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             return PRESET_SLEEP
         return PRESET_NONE
 
+
+    def _execute(self, appliance: Any, action: Any) -> None:
+        """Send a command; a refusal becomes a readable HomeAssistantError."""
+        execute_or_raise(self._client, appliance, action, self.name)
+
     def set_preset_mode(self, preset_mode: str) -> None:
         if preset_mode not in HA_TO_FRIGIDAIRE_PRESET:
             return
-        self._client.execute_action(
+        self._execute(
             self._appliance, frigidaire.Action.set_sleep_mode(HA_TO_FRIGIDAIRE_PRESET[preset_mode])
         )
         self._optimistic_preset_mode = preset_mode
@@ -393,7 +398,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             return
         if swing_mode not in HA_TO_FRIGIDAIRE_SWING:
             return
-        self._client.execute_action(
+        self._execute(
             self._appliance, frigidaire.Action.set_vertical_swing(HA_TO_FRIGIDAIRE_SWING[swing_mode])
         )
         self._optimistic_swing_mode = swing_mode
@@ -424,7 +429,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
 
         _LOGGER.debug("Setting temperature to %s %s", temperature, self.temperature_unit)
-        self._client.execute_action(self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit))
+        self._execute(self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit))
         self._optimistic_temperature = float(temperature)
         self._set_optimistic_window()
         self.schedule_update_ha_state(force_refresh=True)
@@ -433,7 +438,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Set new target fan mode."""
         if fan_mode not in HA_TO_FRIGIDAIRE_FAN_MODE:
             return
-        self._client.execute_action(
+        self._execute(
             self._appliance, frigidaire.Action.set_fan_speed(HA_TO_FRIGIDAIRE_FAN_MODE[fan_mode])
         )
         self._optimistic_fan_mode = fan_mode
@@ -445,7 +450,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         _LOGGER.debug("Setting HVAC mode to %s", hvac_mode)
 
         if hvac_mode == HVACMode.OFF:
-            self._client.execute_action(self._appliance, frigidaire.Action.set_mode(frigidaire.Mode.OFF))
+            self._execute(self._appliance, frigidaire.Action.set_mode(frigidaire.Mode.OFF))
         else:
             if hvac_mode not in HA_TO_FRIGIDAIRE_HVAC_MODE:
                 return
@@ -460,8 +465,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             # set_power on it skips the power command on every retry and the unit never
             # starts. Power is a set (ON/OFF), not a toggle, so this is harmless on a unit
             # that really is running.
-            self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
-            self._client.execute_action(
+            self._execute(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
+            self._execute(
                 self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
             )
             if was_off:
@@ -473,7 +478,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
                 # traffic on every mode change.
                 current_temp = self.target_temperature
                 if current_temp is not None:
-                    self._client.execute_action(
+                    self._execute(
                         self._appliance,
                         frigidaire.Action.set_temperature(
                             int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]

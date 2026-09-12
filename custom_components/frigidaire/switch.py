@@ -14,7 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import normalize_enum_value, suggest_area
+from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .vendor import frigidaire
 from .vendor.frigidaire import Component, Detail, Setting
 
@@ -135,10 +135,15 @@ class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], Switch
         # and str() of one is its qualified name, not its value (Python 3.11+).
         return normalize_enum_value(raw) == normalize_enum_value(on_val)
 
+
+    def _execute(self, appliance: Any, action: Any) -> None:
+        """Send a command; a refusal becomes a readable HomeAssistantError."""
+        execute_or_raise(self._client, appliance, action, self.name)
+
     def turn_on(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, self._desc.make_action(True))
+        self._execute(self._appliance, self._desc.make_action(True))
         self.schedule_update_ha_state(force_refresh=True)
 
     def turn_off(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, self._desc.make_action(False))
+        self._execute(self._appliance, self._desc.make_action(False))
         self.schedule_update_ha_state(force_refresh=True)

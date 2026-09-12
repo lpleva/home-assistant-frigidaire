@@ -5,7 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import area_registry as ar
+
+from .const import DOMAIN
+from .vendor import frigidaire
 
 
 def normalize_enum_value(value: Any) -> Any:
@@ -50,3 +54,21 @@ def suggest_area(hass: HomeAssistant, nickname: str) -> str | None:
         default=None,
     )
     return match
+
+
+def execute_or_raise(client: Any, appliance: Any, action: Any, device_name: str | None) -> None:
+    """Send a command, turning a refused one into a sentence the dashboard can show.
+
+    The client raises FrigidaireException for any non-2xx answer (Electrolux refuses a
+    target humidity in Auto mode with a 400, for one). Left alone, that reaches the
+    frontend as "Unexpected exception" plus a traceback in the log; wrapped, it reads
+    "Dehumidifier refused the command: ...".
+    """
+    try:
+        client.execute_action(appliance, action)
+    except frigidaire.FrigidaireException as err:
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_refused",
+            translation_placeholders={"device": device_name or "The appliance", "error": str(err)},
+        ) from err

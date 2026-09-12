@@ -25,7 +25,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import normalize_enum_value, suggest_area
+from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .parsers import bucket_is_full, filter_needs_attention, normalize_alerts
 from .vendor import frigidaire
 
@@ -231,12 +231,17 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         """Return the maximum humidity."""
         return 85
 
+
+    def _execute(self, appliance: Any, action: Any) -> None:
+        """Send a command; a refusal becomes a readable HomeAssistantError."""
+        execute_or_raise(self._client, appliance, action, self.name)
+
     def turn_on(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
+        self._execute(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
         self.schedule_update_ha_state(force_refresh=True)
 
     def turn_off(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.OFF))
+        self._execute(self._appliance, frigidaire.Action.set_power(frigidaire.Power.OFF))
         self.schedule_update_ha_state(force_refresh=True)
 
     def set_humidity(self, humidity: int) -> None:
@@ -252,9 +257,9 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
             # Switch to Dry only when the active mode would ignore the setpoint. Doing it
             # unconditionally dropped a unit out of Continuous every time the humidity
             # slider moved, which is not what anyone asked for.
-            self._client.execute_action(self._appliance, frigidaire.Action.set_mode(frigidaire.Mode.DRY))
+            self._execute(self._appliance, frigidaire.Action.set_mode(frigidaire.Mode.DRY))
 
-        self._client.execute_action(self._appliance, frigidaire.Action.set_humidity(humidity))
+        self._execute(self._appliance, frigidaire.Action.set_humidity(humidity))
         # One refresh for the whole operation: each one is a full account fetch.
         self.schedule_update_ha_state(force_refresh=True)
 
@@ -265,7 +270,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
             return
 
         action = frigidaire.Action.set_fan_speed(HA_TO_FRIGIDAIRE_FAN_MODE[fan_mode])
-        self._client.execute_action(self._appliance, action)
+        self._execute(self._appliance, action)
         self.schedule_update_ha_state(force_refresh=True)
 
     def set_mode(self, mode: str) -> None:
@@ -281,7 +286,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         # power command is sent directly rather than through turn_on(), which would queue
         # a second full refresh of its own.
         if state == frigidaire.ApplianceState.OFF:
-            self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
+            self._execute(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
 
-        self._client.execute_action(self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_MODE[mode]))
+        self._execute(self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_MODE[mode]))
         self.schedule_update_ha_state(force_refresh=True)
