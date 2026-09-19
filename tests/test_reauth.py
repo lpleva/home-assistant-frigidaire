@@ -4,6 +4,8 @@ import json
 from datetime import timedelta
 from unittest.mock import patch
 
+import requests
+
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -151,3 +153,17 @@ async def test_an_entry_from_a_newer_release_is_not_downgraded(hass: HomeAssista
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.state is ConfigEntryState.MIGRATION_ERROR
+
+
+async def test_an_outage_during_re_authentication_backs_off_instead_of_prompting(hass: HomeAssistant, setup_entry) -> None:
+    """2026-09-16: the internet dropped while the client was re-authenticating and the wording looked like a bad password."""
+    entry, stub = await setup_entry([LEGACY_AC])
+    err = frigidaire.FrigidaireException("Failed to authenticate: no identity provider returned for country US")
+    err.__cause__ = requests.exceptions.ConnectionError("Name or service not known")
+    stub.details_error = err
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert _reauth_flows(hass) == []
+    assert entry.state is ConfigEntryState.LOADED

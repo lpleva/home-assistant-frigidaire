@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import socket
 from typing import Any
+
+import requests
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -22,14 +25,42 @@ def normalize_enum_value(value: Any) -> Any:
     return value
 
 
+def _network_failure_in_chain(err: BaseException) -> bool:
+    """Whether err, or anything it was raised from, is a transport failure.
+
+    The vendored client wraps a requests ConnectionError or Timeout in a
+    FrigidaireException (``raise ... from e``), and when that happens inside the
+    re-authentication step the wording can look like an authentication failure. A
+    transport failure never means the stored credentials are wrong.
+    """
+    seen: set[int] = set()
+    e: BaseException | None = err
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+            return True
+        if isinstance(e, (ConnectionError, TimeoutError, socket.timeout)):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
 def is_auth_failure(err: Exception) -> bool:
     """Whether a library error means the stored credentials no longer work.
 
-    Structural first: the client sets status_code and error_code on FrigidaireException.
-    The message match is a fallback for wording this fork does not control, not the
-    contract — classifying on the English text alone silently turns every wrong password
-    into "cannot connect" the moment that wording changes.
+    Structural only: the vendored client sets status_code and error_code on
+    FrigidaireException for every answer Electrolux or Gigya gives about credentials
+    (a wrong password is errorCode 4030xx -> ``invalid_credentials`` with status 401;
+    an expired session is a 401/403 from the API). The messages that merely say
+    "Failed to authenticate" without a code are malformed or missing responses (no
+    identity provider, sessionInfo absent with no error code, accessToken missing),
+    which is exactly what an internet outage produces. Until 0.2.5 those words were
+    matched as a fallback and a three-minute outage on 2026-09-16 asked for the
+    password; a transport failure anywhere in the exception chain now settles it as
+    "cannot connect" before anything else is looked at.
     """
+    if _network_failure_in_chain(err):
+        return False
     error_code = getattr(err, "error_code", None)
     if error_code == "cas_3403":
         # The active-session cap. It can arrive with a 4xx status, but the credentials are
@@ -38,9 +69,7 @@ def is_auth_failure(err: Exception) -> bool:
         return False
     if error_code in ("invalid_credentials", "reauth_required"):
         return True
-    if getattr(err, "status_code", None) in (401, 403):
-        return True
-    return "Failed to authenticate" in str(err)
+    return getattr(err, "status_code", None) in (401, 403)
 
 
 def suggest_area(hass: HomeAssistant, nickname: str) -> str | None:

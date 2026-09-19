@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- An internet outage no longer asks for the Frigidaire password. On 2026-09-16 at 1:20 AM a three-minute outage hit while the client was re-authenticating; the resulting exception carried no error code but its wording matched the "Failed to authenticate" fallback in `is_auth_failure`, so the coordinator raised `ConfigEntryAuthFailed`, opened a re-login flow and stopped polling. The classifier is now structural only (a wrong password always arrives as `invalid_credentials` / 401 from the vendored client; the wording-only messages are malformed or missing responses), and a requests `ConnectionError` or `Timeout` anywhere in the exception chain settles it as "cannot connect" first. The coordinator then backs off as it does for any transient failure. Five tests.
+
 ## 0.2.4
 
 - A command Electrolux refuses (a target humidity while the unit is in Auto mode, say) now reaches the dashboard as "Dehumidifier refused the command: Request failed with status 400 (...)" instead of "Unexpected exception" with a traceback in the log. Every command the humidifier, climate and switch entities send goes through one helper; two tests.
