@@ -577,3 +577,20 @@ def test_an_expired_session_is_logged_at_debug_not_warning(caplog) -> None:
             requests.exceptions.ConnectionError("down"), "GET", "https://api.us.ocp.electrolux.one/x", {}, ""
         )
     assert [r.levelno for r in caplog.records if "Error processing request" in r.message] == [logging.WARNING]
+
+
+def test_a_non_200_answer_is_logged_with_its_status_code_and_size_but_never_a_body(caplog) -> None:
+    """2026-09-19: Electrolux answered 206 twice and nothing recorded what those carried."""
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    partial = frigidaire.FrigidaireException("Request failed with status 206 (error=None, 4812 bytes)", status_code=206)
+    with pytest.raises(frigidaire.FrigidaireException):
+        frigidaire.Frigidaire.handle_request_exception(partial, "GET", "https://api.us.ocp.electrolux.one/x", {}, "")
+    logged = [r.message for r in caplog.records if "Error processing request" in r.message][0]
+    assert "detail=Request failed with status 206 (error=None, 4812 bytes)" in logged
+
+    caplog.clear()
+    leaky = frigidaire.FrigidaireException("Failed to authenticate: sessionInfo missing (response keys: ['regToken'])")
+    with pytest.raises(frigidaire.FrigidaireException):
+        frigidaire.Frigidaire.handle_request_exception(leaky, "POST", "https://api.us.ocp.electrolux.one/login", {}, "")
+    logged = [r.message for r in caplog.records if "Error processing request" in r.message][0]
+    assert "detail=" not in logged and "regToken" not in logged

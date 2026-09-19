@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.7
+
+- A refused request is logged with the client's own body-free detail line ("Request failed with status 206 (error=None, 4812 bytes)"): the status, the platform error code and the byte count. On 2026-09-19 Electrolux answered two polls with 206 and nothing recorded whether those carried the appliance list or a stub, so no decision on accepting 206 could be made. Other exception text is still kept out of the log. One test.
+
 ## 0.2.6
 
 - The 12-hour session renewal is silent. The client now records when a session key was minted (`session_issued_at`, stored beside the key and refresh token) and mints the next one an hour before expiry, ahead of the next request, so the routine renewal no longer starts with a refused request. If a request is refused with a 401 anyway (a session that expired while Home Assistant was down, say), the vendored client logs it at DEBUG instead of WARNING with a traceback; the refresh-then-retry that follows is unchanged, and every other failure (an outage, a 5xx, a malformed body) keeps its warning. Eighteen such warnings a week were noise and once misled the weekly health check.

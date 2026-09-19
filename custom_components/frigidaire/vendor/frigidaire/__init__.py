@@ -164,6 +164,9 @@ def _is_transport_failure(err: BaseException) -> bool:
     return False
 
 
+_SAFE_DETAIL_PREFIXES = ("Request failed with status", "Received an unexpected response")
+
+
 class FrigidaireException(Exception):
     def __init__(self, message: str, *, status_code: int | None = None, error_code: str | None = None):
         super().__init__(message)
@@ -1147,9 +1150,16 @@ class Frigidaire:
         # who need it can inspect __cause__ on the raised exception.
         safe_headers = _redact_headers(headers)
         safe_payload = _redact_payload(payload)
+        # parse_response's own messages are body-free by construction (status, the
+        # platform error code and a byte count, never the body), so they are safe to
+        # log and are the only way to tell a 206 that carried the appliance list from
+        # a 206 stub (2026-09-19: two of them were thrown away unseen). Any other
+        # exception text stays out, since requests can embed the response.
+        detail = str(e) if isinstance(e, FrigidaireException) and str(e).startswith(_SAFE_DETAIL_PREFIXES) else ""
         error_str = (
             f"Error processing request ({type(e).__name__}):\n"
             f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
+            + (f"detail={detail}\n" if detail else "")
         )
         # A 401 is the session key's expiry, which _with_reauth refreshes on the next
         # attempt (or a wrong password, which the caller reports itself). It is not
