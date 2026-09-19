@@ -9,11 +9,14 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
+import time
 import threading
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+import requests
 from vendor import frigidaire
 from vendor.frigidaire import rate_limit
 
@@ -495,3 +498,82 @@ def test_a_still_valid_session_is_not_refreshed() -> None:
 
     assert [m for m, _, _ in session.calls] == ["GET"]
     assert client.refresh_token == "keep-me"
+
+
+def test_a_session_near_the_end_of_its_life_is_refreshed_before_the_request() -> None:
+    client = _client()
+    client.refresh_token = "old-refresh"
+    client.session_issued_at = time.time() - 11.5 * 3600  # 12-hour key, 30 minutes left
+    session = RecordingSession([FakeResponse({"accessToken": "early-key", "refreshToken": "next-refresh", "expiresIn": 43200})])
+    client._session = session
+
+    assert client.refresh_session_if_stale() is True
+
+    assert client.session_key == "early-key"
+    assert client.refresh_token == "next-refresh"
+    assert [m for m, _, _ in session.calls] == ["POST"]
+    assert _body(session.calls[0])["grantType"] == "refresh_token"
+    assert time.time() - client.session_issued_at < 5  # re-stamped at the mint
+
+
+def test_a_fresh_session_is_left_alone() -> None:
+    client = _client()
+    client.refresh_token = "keep"
+    client.session_issued_at = time.time() - 3600
+    session = RecordingSession()
+    client._session = session
+
+    assert client.refresh_session_if_stale() is False
+    assert session.calls == []
+    assert client.session_key == "cached-key"
+
+
+def test_a_key_of_unknown_age_is_not_refreshed_early() -> None:
+    """Auth files from before 0.2.6 carry no stamp; the refused-request path still covers them."""
+    client = _client()
+    client.refresh_token = "keep"
+    client.session_issued_at = None
+    assert client.refresh_session_if_stale() is False
+
+
+def test_an_outage_during_a_refresh_keeps_the_refresh_token() -> None:
+    client = _client()
+    client.refresh_token = "keep-me"
+    client.session_issued_at = time.time() - 11.5 * 3600
+
+    class DownSession(RecordingSession):
+        def request(self, method, url, **kwargs):
+            raise requests.exceptions.ConnectionError("Name or service not known")
+
+    client._session = DownSession()
+
+    assert client.refresh_session_if_stale() is False
+    assert client.refresh_token == "keep-me"
+    assert client.session_key == "cached-key"
+
+
+def test_every_api_operation_refreshes_a_stale_session_first() -> None:
+    client = _client()
+    calls: list[str] = []
+    with (
+        patch.object(client, "refresh_session_if_stale", lambda: calls.append("refresh") or False),
+        patch.object(client, "_fetch_raw_appliances", lambda: calls.append("fetch") or []),
+    ):
+        client.get_appliances_raw()
+    assert calls == ["refresh", "fetch"]
+
+
+def test_an_expired_session_is_logged_at_debug_not_warning(caplog) -> None:
+    """The renewal that follows always succeeds; the log used to carry a traceback twice a day."""
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    expired = frigidaire.FrigidaireException("Request failed with status 401", status_code=401)
+    with pytest.raises(frigidaire.FrigidaireException):
+        frigidaire.Frigidaire.handle_request_exception(expired, "GET", "https://api.us.ocp.electrolux.one/x", {}, "")
+    assert [r.levelno for r in caplog.records if "Error processing request" in r.message] == [logging.DEBUG]
+
+    caplog.clear()
+    with pytest.raises(frigidaire.FrigidaireException):
+        frigidaire.Frigidaire.handle_request_exception(
+            requests.exceptions.ConnectionError("down"), "GET", "https://api.us.ocp.electrolux.one/x", {}, ""
+        )
+    assert [r.levelno for r in caplog.records if "Error processing request" in r.message] == [logging.WARNING]

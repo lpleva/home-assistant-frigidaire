@@ -167,3 +167,16 @@ async def test_an_outage_during_re_authentication_backs_off_instead_of_prompting
 
     assert _reauth_flows(hass) == []
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_the_session_mint_time_is_stored_and_survives_a_reload(hass: HomeAssistant, setup_entry, tmp_path) -> None:
+    """The early-refresh needs the key's age; re-saving on every start must not reset it."""
+    entry, _stub = await setup_entry([DEHUMIDIFIER])
+    path = tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json"
+    first = json.loads(path.read_text())["session_issued_at"]
+    assert isinstance(first, float)
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert json.loads(path.read_text())["session_issued_at"] == first

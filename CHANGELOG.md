@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.6
+
+- The 12-hour session renewal is silent. The client now records when a session key was minted (`session_issued_at`, stored beside the key and refresh token) and mints the next one an hour before expiry, ahead of the next request, so the routine renewal no longer starts with a refused request. If a request is refused with a 401 anyway (a session that expired while Home Assistant was down, say), the vendored client logs it at DEBUG instead of WARNING with a traceback; the refresh-then-retry that follows is unchanged, and every other failure (an outage, a 5xx, a malformed body) keeps its warning. Eighteen such warnings a week were noise and once misled the weekly health check.
+- A refresh attempt that fails because the network is down keeps the refresh token. Before, any failure dropped it, so an outage at the wrong moment turned into a password prompt at the next expiry.
+- Eight tests.
+
 ## 0.2.5
 
 - An internet outage no longer asks for the Frigidaire password. On 2026-09-16 at 1:20 AM a three-minute outage hit while the client was re-authenticating; the resulting exception carried no error code but its wording matched the "Failed to authenticate" fallback in `is_auth_failure`, so the coordinator raised `ConfigEntryAuthFailed`, opened a re-login flow and stopped polling. The classifier is now structural only (a wrong password always arrives as `invalid_credentials` / 401 from the vendored client; the wording-only messages are malformed or missing responses), and a requests `ConnectionError` or `Timeout` anywhere in the exception chain settles it as "cannot connect" first. The coordinator then backs off as it does for any transient failure. Five tests.

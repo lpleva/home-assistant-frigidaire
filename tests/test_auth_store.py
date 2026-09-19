@@ -138,3 +138,13 @@ def test_remove_auth_deletes_only_that_entrys_file(tmp_path) -> None:
 
 def test_remove_auth_is_a_no_op_when_the_file_is_already_gone(tmp_path) -> None:
     auth_store.remove_auth(str(tmp_path), "e1")
+
+
+def test_the_mint_time_round_trips_and_old_files_have_none(tmp_path) -> None:
+    path = str(tmp_path / ".storage" / "frigidaire-abc.json")
+    auth_store.save_auth(path, "the-key", "https://api.us.example", "the-refresh", 1_700_000_000.5)
+    assert auth_store.load_session_issued_at(path) == 1_700_000_000.5
+    assert auth_store.load_auth(path) == ("the-key", "https://api.us.example", "the-refresh")
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps({"session_key": "old", "regional_base_url": "https://api.us.example"}))
+    assert auth_store.load_session_issued_at(str(old)) is None

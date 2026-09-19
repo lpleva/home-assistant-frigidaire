@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 import threading
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 
 from .auth_store import (
+    load_session_issued_at,
     load_auth,
     per_entry_auth_path,
     purge_legacy_auth,
@@ -62,20 +64,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # clobber each other's session keys (which would force re-auth and trip cas_3403).
         auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
 
+        loaded_auth_path = resolve_initial_auth_path(hass.config.path(), entry.entry_id)
+        loaded_key, loaded_issued_at = load_auth(loaded_auth_path)[0], load_session_issued_at(loaded_auth_path)
+
         def persist_session_key(session_key: str, regional_base_url: str | None, refresh_token: str | None = None) -> None:
             # Called whenever the client mints or refreshes a session key. Persisting it
             # (with the refresh token that mints the next one) means a still-valid token
             # survives restarts instead of being abandoned — abandoned sessions linger
             # server-side and trip Frigidaire's active-session cap (cas_3403).
+            # A key that was loaded from disk keeps its original mint time; a new one is
+            # stamped now. The stamp is what lets the client renew an hour early.
+            issued_at = loaded_issued_at if session_key == loaded_key and loaded_issued_at else time.time()
             with _AUTH_WRITE_LOCK:
-                save_auth(auth_path, session_key, regional_base_url, refresh_token)
+                save_auth(auth_path, session_key, regional_base_url, refresh_token, issued_at)
 
         try:
             # Fall back to the legacy shared file on first run so an existing
             # cached key is migrated instead of forcing a re-auth.
-            session_key, regional_base_url, refresh_token = load_auth(
-                resolve_initial_auth_path(hass.config.path(), entry.entry_id)
-            )
+            session_key, regional_base_url, refresh_token = load_auth(loaded_auth_path)
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
@@ -87,6 +93,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 regional_base_url=regional_base_url,
                 refresh_token=refresh_token,
                 on_session_key_update=persist_session_key,
+                session_issued_at=loaded_issued_at,
                 session_max_retries=1,
             )
             persist_session_key(client.session_key, client.regional_base_url, getattr(client, "refresh_token", None))

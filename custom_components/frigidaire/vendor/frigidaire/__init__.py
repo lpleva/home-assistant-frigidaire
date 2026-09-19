@@ -146,6 +146,24 @@ def _require_field(response: dict, key: str, what: str) -> str:
     return value
 
 
+# Session keys live 12 hours (expiresIn on the token response); refresh this long before
+# the end so the routine renewal never produces a refused request.
+SESSION_LIFETIME = 43200.0
+SESSION_REFRESH_MARGIN = 3600.0
+
+
+def _is_transport_failure(err: BaseException) -> bool:
+    """A network-level failure, possibly wrapped: never a verdict on a token."""
+    seen: set[int] = set()
+    e: BaseException | None = err
+    while e is not None and id(e) not in seen:
+        seen.add(id(e))
+        if isinstance(e, (requests.exceptions.ConnectionError, requests.exceptions.Timeout, ConnectionError, TimeoutError)):
+            return True
+        e = e.__cause__ or e.__context__
+    return False
+
+
 class FrigidaireException(Exception):
     def __init__(self, message: str, *, status_code: int | None = None, error_code: str | None = None):
         super().__init__(message)
@@ -523,6 +541,7 @@ class Frigidaire:
         session_max_retries: int = 2,
         session_retry_backoff: float = 0.0,
         on_session_key_update: Callable[[str, str | None, str | None], None] | None = None,
+        session_issued_at: float | None = None,
     ):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
@@ -554,6 +573,10 @@ class Frigidaire:
                             retried. 0 disables session retries entirely.
         :param session_retry_backoff: Seconds to sleep before each session retry, scaled by attempt
                             number (default 0.0 = no delay).
+        :param session_issued_at: When the given session_key was minted (time.time()). With it, the
+                            client refreshes the key an hour before its 12-hour life ends instead
+                            of waiting for Electrolux to refuse a request; without it, the first
+                            refused request triggers the refresh (one quiet retry).
         :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url,
                             refresh_token) whenever a new session key is minted or refreshed. Lets callers persist the key so it
                             survives restarts instead of abandoning a still-valid token and minting a
@@ -563,6 +586,8 @@ class Frigidaire:
         self.password = password
         self.session_key: str | None = session_key
         self.refresh_token: str | None = refresh_token
+        self.session_issued_at: float | None = session_issued_at if session_key else None
+        self.session_lifetime: float = SESSION_LIFETIME
         # A cached base URL comes back from the caller's own storage, so it gets the same
         # check as one read from a response. A bad one is dropped rather than raised on:
         # re-authenticating recovers, and refusing to start would strand the caller with a
@@ -813,6 +838,7 @@ class Frigidaire:
         _LOGGER.debug("Authentication successful, storing new session key")
         self.session_key = access_token
         self.refresh_token = frigidaire_auth_response.get("refreshToken") or None
+        self._stamp_session(frigidaire_auth_response)
         self._emit_session_key_update()
 
     def _refresh_session(self) -> bool:
@@ -834,6 +860,10 @@ class Frigidaire:
                 data,
             )
         except (FrigidaireException, ConnectionError) as err:
+            if _is_transport_failure(err):
+                # The network failed, not the token. Keep it for the next attempt.
+                _LOGGER.debug("Session refresh could not reach Electrolux (%s); keeping the refresh token", type(err).__name__)
+                return False
             _LOGGER.debug("Refresh token rejected (%s); a full login is needed", getattr(err, "status_code", "?"))
             self.refresh_token = None
             return False
@@ -845,8 +875,39 @@ class Frigidaire:
         _LOGGER.debug("Session refreshed, storing new session key")
         self.session_key = access_token
         self.refresh_token = response.get("refreshToken") or self.refresh_token
+        self._stamp_session(response)
         self._emit_session_key_update()
         return True
+
+    def _stamp_session(self, token_response: dict) -> None:
+        """Record when the current session key was minted and how long it lives."""
+        self.session_issued_at = time.time()
+        expires_in = token_response.get("expiresIn")
+        if isinstance(expires_in, (int, float)) and expires_in > 0:
+            self.session_lifetime = float(expires_in)
+
+    def session_is_stale(self) -> bool:
+        """Whether the session key is within SESSION_REFRESH_MARGIN of the end of its life."""
+        if not self.session_key or self.session_issued_at is None:
+            return False
+        return time.time() >= self.session_issued_at + self.session_lifetime - SESSION_REFRESH_MARGIN
+
+    def refresh_session_if_stale(self) -> bool:
+        """Mint the next session key before the current one expires.
+
+        Called ahead of every API operation. Without this the first request after the
+        12-hour mark was refused, retried and only then refreshed, which put a warning
+        with a traceback in the log twice a day for a renewal that always succeeded.
+        A failed early refresh is harmless: the current key still works until expiry,
+        and the refused-request path below is unchanged.
+        """
+        if not (self.refresh_token and self.regional_base_url and self.session_is_stale()):
+            return False
+        with self._reauth_lock:
+            if not self.session_is_stale():
+                return False  # another thread just did it
+            _LOGGER.debug("Session key is near the end of its life; refreshing it early")
+            return self._refresh_session()
 
     def _emit_session_key_update(self) -> None:
         """Notify the caller of a freshly minted session key so it can be persisted.
@@ -905,6 +966,7 @@ class Frigidaire:
         The number of retries and any delay between them are configurable via
         ``session_max_retries`` and ``session_retry_backoff``.
         """
+        self.refresh_session_if_stale()
         last_attempt = self._session_max_retries
         for attempt in range(last_attempt + 1):
             key_before = self.session_key
@@ -1089,7 +1151,12 @@ class Frigidaire:
             f"Error processing request ({type(e).__name__}):\n"
             f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
         )
-        _LOGGER.warning(error_str)
+        # A 401 is the session key's expiry, which _with_reauth refreshes on the next
+        # attempt (or a wrong password, which the caller reports itself). It is not
+        # something a reader of the log needs to see twice a day. Everything else stays
+        # a warning: an outage, a 5xx, a malformed body.
+        expired = isinstance(e, FrigidaireException) and getattr(e, "status_code", None) == 401
+        _LOGGER.log(logging.DEBUG if expired else logging.WARNING, error_str)
         # Preserve structured error info from the wrapped exception so re-auth logic
         # downstream can still recognise the failure class (e.g. the cas_3403 session cap).
         raise FrigidaireException(

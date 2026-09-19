@@ -53,7 +53,26 @@ def load_auth(auth_path: str) -> tuple[str | None, str | None, str | None]:
     return obj.get("session_key"), obj.get("regional_base_url"), obj.get("refresh_token")
 
 
-def save_auth(auth_path: str, session_key: str, regional_base_url: str | None, refresh_token: str | None = None) -> None:
+def load_session_issued_at(auth_path: str) -> float | None:
+    """When the stored session key was minted (time.time()), or None for files from before 0.2.6."""
+    if not os.path.exists(auth_path) or os.path.getsize(auth_path) == 0:
+        return None
+    try:
+        with open(auth_path) as f:
+            obj = json.load(f)
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+        return None
+    value = obj.get("session_issued_at") if isinstance(obj, dict) else None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def save_auth(
+    auth_path: str,
+    session_key: str,
+    regional_base_url: str | None,
+    refresh_token: str | None = None,
+    session_issued_at: float | None = None,
+) -> None:
     """Write the session key (and refresh token) atomically, readable only by the owner."""
     directory = os.path.dirname(auth_path) or "."
     os.makedirs(directory, exist_ok=True)
@@ -62,7 +81,12 @@ def save_auth(auth_path: str, session_key: str, regional_base_url: str | None, r
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(
-                {"session_key": session_key, "regional_base_url": regional_base_url, "refresh_token": refresh_token},
+                {
+                    "session_key": session_key,
+                    "regional_base_url": regional_base_url,
+                    "refresh_token": refresh_token,
+                    "session_issued_at": session_issued_at,
+                },
                 f,
                 ensure_ascii=False,
                 indent=4,
