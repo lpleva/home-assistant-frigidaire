@@ -113,6 +113,7 @@ class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], Switch
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -134,7 +135,6 @@ class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], Switch
         # Both sides through the same normaliser: on_val may be a str enum member,
         # and str() of one is its qualified name, not its value (Python 3.11+).
         return normalize_enum_value(raw) == normalize_enum_value(on_val)
-
 
     def _execute(self, appliance: Any, action: Any) -> None:
         """Send a command; a refusal becomes a readable HomeAssistantError."""

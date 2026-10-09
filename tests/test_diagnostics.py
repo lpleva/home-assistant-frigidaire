@@ -54,3 +54,17 @@ async def test_diagnostics_do_not_leak_the_id_through_a_missing_nickname(hass: H
     dumped = json.dumps(await _diagnostics(hass, entry))
 
     assert "AC-LEGACY-1" not in dumped
+
+
+async def test_diagnostics_redact_the_appliance_time_zone(hass: HomeAssistant, setup_entry) -> None:
+    """The configured time zone narrows down where the house is."""
+    record = json.loads(json.dumps(DEHUMIDIFIER))
+    record["properties"]["reported"]["TimeZoneStandardName"] = "Central Standard Time"
+    record["properties"]["reported"]["TimeZoneDaylightRule"] = "US"
+    entry, _stub = await setup_entry([record])
+
+    reported = (await _diagnostics(hass, entry))["appliances"][0]["reported"]
+
+    assert reported["TimeZoneStandardName"] == "**REDACTED**"
+    assert reported["TimeZoneDaylightRule"] == "**REDACTED**"
+    assert reported["targetHumidity"] == 45

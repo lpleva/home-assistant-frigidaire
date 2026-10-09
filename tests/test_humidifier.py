@@ -217,3 +217,21 @@ async def test_a_model_that_never_reports_smart_is_not_offered_it(hass: HomeAssi
         "auto",
         "sleep",
     ]
+
+
+async def test_current_humidity_is_the_native_property(hass: HomeAssistant, setup_entry) -> None:
+    """Home Assistant publishes the entity's current_humidity property as the attribute."""
+    await setup_entry([DEHUMIDIFIER])
+
+    state = hass.states.get(humidifier_id(hass))
+    assert state.attributes["current_humidity"] == 55
+    assert state.attributes["humidity"] == 45
+
+
+async def test_a_placeholder_humidity_reading_is_left_out(hass: HomeAssistant, setup_entry) -> None:
+    """A reading outside 0-100 % is a placeholder, not a measurement; the attribute is omitted."""
+    await setup_entry([with_reported(DEHUMIDIFIER, sensorHumidity=255)])
+
+    state = hass.states.get(humidifier_id(hass))
+    assert state.state == "on"
+    assert "current_humidity" not in state.attributes

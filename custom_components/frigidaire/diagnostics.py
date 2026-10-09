@@ -32,6 +32,10 @@ TO_REDACT = {
     "macAddress",
     "ssid",
     "deviceId",
+    # The appliance's configured time zone narrows down where the house is. Upstream #159
+    # added these two to its own redaction set.
+    "TimeZoneStandardName",
+    "TimeZoneDaylightRule",
 }
 
 

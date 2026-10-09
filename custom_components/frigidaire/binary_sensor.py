@@ -87,6 +87,7 @@ class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordina
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -122,6 +123,7 @@ class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -168,6 +170,7 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -215,6 +218,7 @@ class FrigidaireCompressorEstimateSensor(CoordinatorEntity[FrigidaireApplianceCo
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 

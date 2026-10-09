@@ -67,6 +67,7 @@ class FrigidaireTimerNumber(CoordinatorEntity[FrigidaireApplianceCoordinator], N
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 

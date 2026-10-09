@@ -26,7 +26,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
 from .helpers import execute_or_raise, normalize_enum_value, suggest_area
-from .parsers import bucket_is_full, filter_needs_attention, normalize_alerts
+from .parsers import bucket_is_full, filter_needs_attention, humidity_percent, normalize_alerts
 from .vendor import frigidaire
 
 _LOGGER = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
         self._attr_supported_features = HumidifierEntityFeature.MODES
@@ -160,6 +161,17 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         return self._details.get(frigidaire.Detail.TARGET_HUMIDITY)
 
     @property
+    def current_humidity(self) -> float | None:
+        """The room humidity the unit measures, as Home Assistant's own property.
+
+        It used to be a hand-written ``current_humidity`` state attribute. The property is
+        what the humidifier card and the ``humidifier`` conditions read, and it goes through
+        the same range check as the humidity sensor, so a placeholder reading (255, say) is
+        left out instead of shown. Taken from upstream #159.
+        """
+        return humidity_percent(self._details.get(frigidaire.Detail.SENSOR_HUMIDITY))
+
+    @property
     def available_modes(self) -> list[str]:
         """Modes offered in the UI.
 
@@ -198,7 +210,6 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         fan_speed = normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
 
         attrib = {
-            "current_humidity": self._details.get(frigidaire.Detail.SENSOR_HUMIDITY),
             "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
             "fan_mode": FRIGIDAIRE_TO_HA_FAN_MODE.get(fan_speed),
         }
@@ -230,7 +241,6 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
     def max_humidity(self):
         """Return the maximum humidity."""
         return 85
-
 
     def _execute(self, appliance: Any, action: Any) -> None:
         """Send a command; a refusal becomes a readable HomeAssistantError."""

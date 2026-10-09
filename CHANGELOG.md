@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.8
+
+- Upstream 0.1.51 (#159) rewrote the integration onto the `frigidaire` 1.0.0 PyPI library and was reviewed commit by commit, not merged: that library still disables TLS verification on every request, silences the insecure-request warning process-wide, follows redirects, prints from the signature generator and writes the session file world-readable, and the rewrite stores the account password in the config entry again. Those are findings C1, H1, H3, H4 and L3 of the 0.2.0 audit, so the fork stays on its vendored, hardened client. Three small pieces that do not depend on the library were taken:
+  - The dehumidifier's room humidity is Home Assistant's own `current_humidity` property instead of a hand-written state attribute, so the humidifier card and `humidifier` conditions read it, and it goes through the same 0-100 % range check as the humidity sensor (a placeholder reading is left out rather than shown). The attribute name on the entity is unchanged.
+  - Diagnostics also redact `TimeZoneStandardName` and `TimeZoneDaylightRule`, which narrow down where the house is.
+  - Every entity's device carries the reported model name, so the device page shows it.
+- Four tests.
+
 ## 0.2.7
 
 - A refused request is logged with the client's own body-free detail line ("Request failed with status 206 (error=None, 4812 bytes)"): the status, the platform error code and the byte count. On 2026-09-19 Electrolux answered two polls with 206 and nothing recorded whether those carried the appliance list or a stub, so no decision on accepting 206 could be made. Other exception text is still kept out of the log. One test.

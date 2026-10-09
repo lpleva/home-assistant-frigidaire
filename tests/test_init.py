@@ -190,3 +190,15 @@ async def test_removing_the_entry_deletes_its_session_key(hass: HomeAssistant, s
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert not path.exists()
+
+
+async def test_device_carries_the_reported_model(hass: HomeAssistant, setup_entry) -> None:
+    """The device page shows applianceData.modelName."""
+    from homeassistant.helpers import device_registry as dr
+
+    entry, _stub = await setup_entry([DEHUMIDIFIER])
+
+    device = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "DH-1"), entry.entry_id)
+    assert device is not None
+    assert device.manufacturer == "Frigidaire"
+    assert device.model == "DH"

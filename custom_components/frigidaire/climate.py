@@ -158,6 +158,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
         # Base feature set. SWING_MODE is added dynamically by _update_swing_support()
@@ -378,7 +379,6 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             return PRESET_SLEEP
         return PRESET_NONE
 
-
     def _execute(self, appliance: Any, action: Any) -> None:
         """Send a command; a refusal becomes a readable HomeAssistantError."""
         execute_or_raise(self._client, appliance, action, self.name)
@@ -386,9 +386,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
     def set_preset_mode(self, preset_mode: str) -> None:
         if preset_mode not in HA_TO_FRIGIDAIRE_PRESET:
             return
-        self._execute(
-            self._appliance, frigidaire.Action.set_sleep_mode(HA_TO_FRIGIDAIRE_PRESET[preset_mode])
-        )
+        self._execute(self._appliance, frigidaire.Action.set_sleep_mode(HA_TO_FRIGIDAIRE_PRESET[preset_mode]))
         self._optimistic_preset_mode = preset_mode
         self._set_optimistic_window()
         self.schedule_update_ha_state(force_refresh=True)
@@ -398,9 +396,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             return
         if swing_mode not in HA_TO_FRIGIDAIRE_SWING:
             return
-        self._execute(
-            self._appliance, frigidaire.Action.set_vertical_swing(HA_TO_FRIGIDAIRE_SWING[swing_mode])
-        )
+        self._execute(self._appliance, frigidaire.Action.set_vertical_swing(HA_TO_FRIGIDAIRE_SWING[swing_mode]))
         self._optimistic_swing_mode = swing_mode
         self._set_optimistic_window()
         self.schedule_update_ha_state(force_refresh=True)
@@ -438,9 +434,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Set new target fan mode."""
         if fan_mode not in HA_TO_FRIGIDAIRE_FAN_MODE:
             return
-        self._execute(
-            self._appliance, frigidaire.Action.set_fan_speed(HA_TO_FRIGIDAIRE_FAN_MODE[fan_mode])
-        )
+        self._execute(self._appliance, frigidaire.Action.set_fan_speed(HA_TO_FRIGIDAIRE_FAN_MODE[fan_mode]))
         self._optimistic_fan_mode = fan_mode
         self._set_optimistic_window()
         self.schedule_update_ha_state(force_refresh=True)
@@ -466,9 +460,7 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             # starts. Power is a set (ON/OFF), not a toggle, so this is harmless on a unit
             # that really is running.
             self._execute(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
-            self._execute(
-                self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
-            )
+            self._execute(self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode]))
             if was_off:
                 # The appliance forgets its setpoint when powered on, and engaging the mode
                 # restores that default, so the remembered setpoint must be re-sent last.

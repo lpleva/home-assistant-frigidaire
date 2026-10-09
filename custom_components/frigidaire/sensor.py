@@ -172,6 +172,7 @@ class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -225,6 +226,7 @@ class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordin
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
@@ -267,6 +269,7 @@ class FrigidaireDetailSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], 
             identifiers={(DOMAIN, self._appliance.appliance_id)},
             name=self._appliance.nickname,
             manufacturer="Frigidaire",
+            model=self._appliance.appliance_type or None,
             suggested_area=suggested_area,
         )
 
