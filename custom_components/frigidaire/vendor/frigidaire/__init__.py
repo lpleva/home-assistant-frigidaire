@@ -164,6 +164,85 @@ def _is_transport_failure(err: BaseException) -> bool:
     return False
 
 
+def _transient_outage(during: str, err: BaseException) -> "FrigidaireException":
+    """The error for an auth step that could not reach Electrolux: retry later, never reauth.
+
+    No status code and error_code "network_unreachable", so nothing classifies it as a
+    credential problem; the caller keeps the transport error as __cause__.
+    """
+    return FrigidaireException(
+        f"Could not reach Electrolux while {during} ({type(err).__name__}); "
+        "the session and refresh token are kept and the next poll retries",
+        error_code="network_unreachable",
+    )
+
+
+# --- TEMPORARY 206 diagnostic (0.2.9) ------------------------------------------------
+# TEMPORARY: remove this block, and its call in get_request, once a 206 body has been
+# captured and the accept-or-refuse decision on 206 is made.
+# Electrolux sometimes answers the appliance-list poll (GET /appliance/api/v2/appliances,
+# behind both "Error fetching frigidaire account data" and "Error requesting frigidaire
+# Dehumidifier data") with HTTP 206, about 715 bytes, error=None. The client still treats
+# it as a failure; this only logs what it carried, plus one normal 200 body of the same
+# request per Home Assistant run to compare against. Only that GET is covered: never the
+# auth/token endpoints, never request headers. Any key that looks like a credential is
+# redacted, at any depth.
+_DIAG_PATH_PREFIX = "/appliance/api/v2/appliances"
+_DIAG_SECRET_KEY_RE = re.compile(r"token|password|secret", re.IGNORECASE)
+_DIAG_SECRET_TEXT_RE = re.compile(
+    r'("[^"]*(?:token|password|secret)[^"]*"\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\]\s]+)', re.IGNORECASE
+)
+_diag_logged_200 = False
+
+
+def _diag_redact(value):
+    if isinstance(value, dict):
+        return {
+            k: ("<redacted>" if isinstance(k, str) and _DIAG_SECRET_KEY_RE.search(k) else _diag_redact(v))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_diag_redact(v) for v in value]
+    return value
+
+
+def _diag_body_text(response: Response) -> str:
+    """The body as redacted text: JSON is redacted by key, anything else by pattern."""
+    raw = response.content or b""
+    try:
+        raw = gzip.decompress(raw)
+    except (OSError, EOFError):
+        pass
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        return json.dumps(_diag_redact(json.loads(text)), separators=(",", ":"))
+    except ValueError:
+        return _DIAG_SECRET_TEXT_RE.sub(r'\1"<redacted>"', text)
+
+
+def _diag_log_appliance_list_body(method: str, path: str, response: Response) -> None:
+    """TEMPORARY 206 diagnostic; see the block comment above."""
+    global _diag_logged_200
+    if method != "GET" or not path.startswith(_DIAG_PATH_PREFIX) or "/command" in path:
+        return
+    status = getattr(response, "status_code", None)
+    try:
+        if status == 206:
+            _LOGGER.warning(
+                "Frigidaire 206 body (temporary diagnostic): GET %s, %d bytes: %s",
+                path, len(response.content or b""), _diag_body_text(response),
+            )
+        elif status == 200 and not _diag_logged_200:
+            _diag_logged_200 = True
+            _LOGGER.warning(
+                "Frigidaire 200 body for comparison, once per run (temporary diagnostic): GET %s, %d bytes: %s",
+                path, len(response.content or b""), _diag_body_text(response),
+            )
+    except Exception:  # a diagnostic must never break a poll
+        _LOGGER.debug("Frigidaire temporary diagnostic could not log a body", exc_info=True)
+# --- end TEMPORARY 206 diagnostic -------------------------------------------------------
+
+
 _SAFE_DETAIL_PREFIXES = ("Request failed with status", "Received an unexpected response")
 
 
@@ -589,6 +668,7 @@ class Frigidaire:
         self.password = password
         self.session_key: str | None = session_key
         self.refresh_token: str | None = refresh_token
+        self._refresh_transport_error: BaseException | None = None
         self.session_issued_at: float | None = session_issued_at if session_key else None
         self.session_lifetime: float = SESSION_LIFETIME
         # A cached base URL comes back from the caller's own storage, so it gets the same
@@ -681,7 +761,11 @@ class Frigidaire:
                 self.test_connection()
                 _LOGGER.debug("Session key is still valid, doing nothing")
                 return None
-            except (FrigidaireException, ConnectionError):
+            except (FrigidaireException, ConnectionError) as err:
+                if _is_transport_failure(err):
+                    # Electrolux could not be reached, so nothing was learned about the
+                    # key. Keep it and report an outage the caller retries next poll.
+                    raise _transient_outage("checking the session", err) from err
                 _LOGGER.debug("Session key is invalid, re-authenticating")
                 self.session_key = None
 
@@ -690,6 +774,13 @@ class Frigidaire:
             # one mints the next without the password, which Home Assistant does not keep.
             if self._refresh_session():
                 return None
+            if self._refresh_transport_error is not None:
+                # The refresh never reached Electrolux (2026-10-09 08:47: a two-minute
+                # router reboot). Until 0.2.9 this fell through to the no-password branch
+                # below and reported reauth_required for a session that was fine. The
+                # refresh token is kept; the next poll tries again.
+                err = self._refresh_transport_error
+                raise _transient_outage("refreshing the session", err) from err
 
         if not self.password:
             # The caller holds no password (Home Assistant keeps it out of the config
@@ -854,6 +945,7 @@ class Frigidaire:
         caller then falls back to a password login or to asking for one.
         """
         assert self.refresh_token is not None
+        self._refresh_transport_error = None
         data = {"grantType": "refresh_token", "clientId": CLIENT_ID, "refreshToken": self.refresh_token, "scope": ""}
         try:
             response = self._post_dict(
@@ -866,6 +958,7 @@ class Frigidaire:
             if _is_transport_failure(err):
                 # The network failed, not the token. Keep it for the next attempt.
                 _LOGGER.debug("Session refresh could not reach Electrolux (%s); keeping the refresh token", type(err).__name__)
+                self._refresh_transport_error = err
                 return False
             _LOGGER.debug("Refresh token rejected (%s); a full login is needed", getattr(err, "status_code", "?"))
             self.refresh_token = None
@@ -937,8 +1030,17 @@ class Frigidaire:
         Removes the session_key and tries to authenticate again
         :return:
         """
+        previous_key, previous_issued_at = self.session_key, self.session_issued_at
         self.session_key = None
-        self.authenticate()
+        try:
+            self.authenticate()
+        except FrigidaireException as err:
+            if err.error_code == "network_unreachable" and self.session_key is None:
+                # An outage proves nothing about the old key, and it may well still be
+                # valid (it was on 2026-10-09). Put it back so the next poll uses it
+                # instead of starting with an empty bearer token.
+                self.session_key, self.session_issued_at = previous_key, previous_issued_at
+            raise
 
     def _post_dict(
         self, url: str | None, path: str, headers: dict[str, str], data: dict, form_encoding: bool = False
@@ -1195,6 +1297,7 @@ class Frigidaire:
             # password. Electrolux does not redirect in this flow, so a 3xx is an error
             # and parse_response reports it as one.
             response = self._session.get(full_url, headers=headers, allow_redirects=False)
+            _diag_log_appliance_list_body("GET", path, response)  # TEMPORARY 206 diagnostic
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "GET", f"{url}{path}", headers, "")

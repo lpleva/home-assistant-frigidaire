@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.9
+
+- A network outage during the session refresh is reported as an outage, not as an expired login. On 2026-10-09 at 8:47 AM a two-minute router reboot hit a poll: the request timed out, the retry could not connect, and the client's re-authentication tried the refresh token, could not reach Electrolux, then fell through to "Session expired and no password is held" (`reauth_required`, status 401) for a session that was fine. It now raises `error_code="network_unreachable"` with no status code, chained to the transport error, so the coordinator backs off and retries on the next poll. The refresh token is kept, and the session key that re-authentication cleared is put back. An outage while checking a cached key also keeps the key instead of dropping it. A refresh token Electrolux actually refuses (401, `invalid_grant`) still asks for the password. Four tests.
+- TEMPORARY diagnostic, to be removed once a 206 has been captured: when the appliance-list poll (GET `/appliance/api/v2/appliances`, the request behind both "Error fetching frigidaire account data" and "Error requesting frigidaire Dehumidifier data") gets HTTP 206, the full body is logged at WARNING as "Frigidaire 206 body (temporary diagnostic): ...", and the first 200 body of the same request in each Home Assistant run is logged once for comparison. Any key named like a token, password or secret is redacted at any depth; request headers and the auth endpoints are never logged. A 206 is still treated as a failure. Four tests.
+
 ## 0.2.8
 
 - Upstream 0.1.51 (#159) rewrote the integration onto the `frigidaire` 1.0.0 PyPI library and was reviewed commit by commit, not merged: that library still disables TLS verification on every request, silences the insecure-request warning process-wide, follows redirects, prints from the signature generator and writes the session file world-readable, and the rewrite stores the account password in the config entry again. Those are findings C1, H1, H3, H4 and L3 of the 0.2.0 audit, so the fork stays on its vendored, hardened client. Three small pieces that do not depend on the library were taken:

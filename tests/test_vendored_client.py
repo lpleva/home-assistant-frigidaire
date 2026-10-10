@@ -594,3 +594,167 @@ def test_a_non_200_answer_is_logged_with_its_status_code_and_size_but_never_a_bo
         frigidaire.Frigidaire.handle_request_exception(leaky, "POST", "https://api.us.ocp.electrolux.one/login", {}, "")
     logged = [r.message for r in caplog.records if "Error processing request" in r.message][0]
     assert "detail=" not in logged and "regToken" not in logged
+
+
+# --- 0.2.9: an outage during the token refresh is an outage, not a reauth --------------
+
+
+class _FailingSession(RecordingSession):
+    """Every request raises the given transport error (the 2026-10-09 router reboot)."""
+
+    def __init__(self, exc: Exception):
+        super().__init__()
+        self.exc = exc
+
+    def request(self, method, url, **kwargs):
+        self.calls.append((method, url, kwargs))
+        raise self.exc
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [requests.exceptions.ConnectionError("Max retries exceeded"), requests.exceptions.ReadTimeout("Read timed out")],
+)
+def test_an_outage_during_re_authentication_is_retryable_and_keeps_both_tokens(exc) -> None:
+    """2026-10-09 08:47: ReadTimeout, ConnectionError, then reauth_required for a session that was fine."""
+    client = _client()
+    client.password = None  # Home Assistant holds no password
+    client.refresh_token = "keep-refresh"
+    issued = client.session_issued_at = time.time() - 3600
+    client._session = _FailingSession(exc)
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.re_authenticate()
+
+    assert excinfo.value.error_code == "network_unreachable"
+    assert excinfo.value.status_code is None
+    assert "no password is held" not in str(excinfo.value)
+    assert client.refresh_token == "keep-refresh"
+    assert client.session_key == "cached-key"  # restored for the next poll
+    assert client.session_issued_at == issued
+    assert client._session.calls[0][1].endswith("/one-account-authorization/api/v1/token")
+
+
+def test_an_outage_while_checking_the_session_keeps_it_and_does_not_refresh() -> None:
+    client = _client()
+    client.password = None
+    client.refresh_token = "keep-refresh"
+    client._session = _FailingSession(requests.exceptions.ConnectionError("down"))
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.authenticate()
+
+    assert excinfo.value.error_code == "network_unreachable"
+    assert client.session_key == "cached-key"
+    assert client.refresh_token == "keep-refresh"
+    assert [m for m, _, _ in client._session.calls] == ["GET"]  # no refresh attempted blind
+
+
+def test_the_outage_error_is_not_classified_as_an_auth_failure() -> None:
+    """End to end through the integration's classifier: UpdateFailed and a retry, never a reauth flow."""
+    from custom_components.frigidaire.helpers import is_auth_failure
+
+    client = _client()
+    client.password = None
+    client.refresh_token = "keep-refresh"
+    client._session_max_retries = 1  # first attempt fails, second re-authenticates
+    client._session = _FailingSession(requests.exceptions.ReadTimeout("Read timed out"))
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.get_appliances_raw()
+
+    assert excinfo.value.error_code == "network_unreachable"
+    assert is_auth_failure(excinfo.value) is False
+    assert client.refresh_token == "keep-refresh"
+    assert client.session_key == "cached-key"
+
+
+@pytest.mark.parametrize("body", [{"error": "invalid_grant"}, {"error": "unauthorized"}])
+def test_a_genuine_refusal_of_the_refresh_token_still_asks_for_reauth(body) -> None:
+    from custom_components.frigidaire.helpers import is_auth_failure
+
+    client = _client()
+    client.password = None
+    client.refresh_token = "dead-refresh"
+    client.session_key = None
+    client._session = RecordingSession([FakeResponse(body, status_code=401)])
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
+        client.authenticate()
+
+    assert excinfo.value.error_code == "reauth_required"
+    assert is_auth_failure(excinfo.value) is True
+    assert client.refresh_token is None
+
+
+# --- 0.2.9: TEMPORARY 206 diagnostic (remove with the code once a 206 body is captured) --
+
+_APPLIANCES_PATH = "/appliance/api/v2/appliances?includeMetadata=true"
+
+
+@pytest.fixture
+def fresh_diag(monkeypatch):
+    monkeypatch.setattr(frigidaire, "_diag_logged_200", False)
+
+
+def _diag_messages(caplog) -> list[str]:
+    return [r.message for r in caplog.records if "temporary diagnostic" in r.message]
+
+
+def test_a_206_logs_its_full_body_with_credentials_redacted(caplog, fresh_diag) -> None:
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    body = {"status": "partial", "items": [{"applianceId": "DH-1", "accessToken": "SEKRIT-A"}], "refresh_token": "SEKRIT-R", "nested": {"password": "SEKRIT-P"}}
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(body, status_code=206)]))
+
+    with pytest.raises(frigidaire.FrigidaireException):
+        client.get_request(client.regional_base_url, _APPLIANCES_PATH, client.get_headers_frigidaire("GET", True))
+
+    records = [r for r in caplog.records if "Frigidaire 206 body (temporary diagnostic)" in r.message]
+    assert len(records) == 1 and records[0].levelno == logging.WARNING
+    msg = records[0].message
+    assert '"applianceId":"DH-1"' in msg and '"status":"partial"' in msg
+    assert "SEKRIT" not in msg and msg.count("<redacted>") == 3
+    assert "cached-key" not in msg and "Bearer" not in msg  # no request headers
+
+
+def test_a_non_json_206_is_logged_raw_with_token_patterns_redacted(caplog, fresh_diag) -> None:
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    raw = b'{"items": [ {"id": 1, "accessToken": "SEKRIT"'  # truncated JSON
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(None, status_code=206, content=raw)]))
+
+    with pytest.raises(frigidaire.FrigidaireException):
+        client.get_request(client.regional_base_url, _APPLIANCES_PATH, {})
+
+    (msg,) = _diag_messages(caplog)
+    assert '"items": [ {"id": 1' in msg and "SEKRIT" not in msg and "<redacted>" in msg
+
+
+def test_one_200_body_is_logged_per_run_for_comparison(caplog, fresh_diag) -> None:
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    ok = [{"applianceId": "DH-1", "properties": {"reported": {"sensorHumidity": 45}}}]
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(ok), FakeResponse(ok)]))
+
+    assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
+    assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
+
+    msgs = _diag_messages(caplog)
+    assert len(msgs) == 1
+    assert msgs[0].startswith("Frigidaire 200 body for comparison") and '"sensorHumidity":45' in msgs[0]
+
+
+def test_the_diagnostic_never_logs_other_requests(caplog, fresh_diag) -> None:
+    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
+    client = _client()  # __init__'s test_connection GET (users/current) returned 200
+    client._session = RecordingSession([
+        FakeResponse({"accessToken": "SEKRIT"}, status_code=206),
+        FakeResponse({"accessToken": "SEKRIT"}),
+        FakeResponse({"ok": True}, status_code=206),
+    ])
+    with pytest.raises(frigidaire.FrigidaireException):
+        client.post_request(client.regional_base_url, "/one-account-authorization/api/v1/token", {}, {})
+    client.post_request(client.regional_base_url, "/one-account-authorization/api/v1/token", {}, {})
+    with pytest.raises(frigidaire.FrigidaireException):
+        client.put_request(client.regional_base_url, "/appliance/api/v2/appliances/DH-1/command", {}, {"x": 1})
+
+    assert _diag_messages(caplog) == []
+    assert frigidaire._diag_logged_200 is False  # the users/current 200 did not use up the one
