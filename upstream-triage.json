@@ -1,0 +1,122 @@
+{
+  "schema": 1,
+  "fork": "home-assistant-frigidaire",
+  "upstream": "https://github.com/bm1549/home-assistant-frigidaire.git",
+  "branch": "main",
+  "baseline": {
+    "sha": "627f4c8cf2ff201cbc88f543d03a264c649f09dc",
+    "date": "2026-09-06",
+    "subject": "Bump version to 0.1.47",
+    "note": "Upstream 0.1.47, the fork point. Covered by the full audit of 2026-09-07 (fork release 0.2.0; CHANGELOG 0.2.0). The frigidaire client is vendored and was audited with it."
+  },
+  "notes": [],
+  "commits": [
+    {
+      "sha": "8218fa65b296f996c531cdf8468b5674834d969c",
+      "date": "2026-09-07",
+      "subject": "Bump frigidaire to 0.18.54 (#157)",
+      "bucket": "implement",
+      "status": "implemented",
+      "reason": "client 0.18.54 taken into the vendored client (DisplayLight enum, set_display_light)",
+      "implemented_in": [
+        "6c001c4467e3a7b24c9ba6131387956958684478"
+      ],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "4cde55a3c4faba5b51935c97de117a0a43d1901e",
+      "date": "2026-09-07",
+      "subject": "Use the DISPLAY_LIGHT values the API accepts for the display light switch (#158)",
+      "bucket": "implement",
+      "status": "implemented",
+      "reason": "display light uses DISPLAY_LIGHT_1/0 (#158), taken with its seven switch tests",
+      "implemented_in": [
+        "6c001c4467e3a7b24c9ba6131387956958684478"
+      ],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "5b95b36e4218f4bdba7892944fd6bdede693b409",
+      "date": "2026-09-08",
+      "subject": "Track Home Assistant 2026.9 and clear what it deprecated (#165)",
+      "bucket": "implement",
+      "status": "implemented",
+      "reason": "HA 2026.9 (#165): the sensor unit change was already here; the test-stack pin and the probatio test change taken",
+      "implemented_in": [
+        "6c001c4467e3a7b24c9ba6131387956958684478"
+      ],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "b821539615b47adf2fa0cf965a38813ebfcb6ad5",
+      "date": "2026-09-08",
+      "subject": "Detect Home Assistant deprecations from CI instead of user reports (#163)",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "daily deprecation-scanning GitHub workflow (#163): the weekly /ha-health check reads the same warnings from the running HA",
+      "implemented_in": [],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "431b0952d349b3a037a1056b11ca6532b9f3499c",
+      "date": "2026-09-08",
+      "subject": "Bump version to 0.1.48",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "upstream's version bump; this fork versions itself",
+      "implemented_in": [],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "da84b8427bd51da6b1d19047d7d4923cea09f07f",
+      "date": "2026-09-08",
+      "subject": "Bump version to 0.1.49",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "upstream's version bump; this fork versions itself",
+      "implemented_in": [],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "822a90dfba9dc2792424ed12fb06e35708e88a19",
+      "date": "2026-09-09",
+      "subject": "Bump version to 0.1.50",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "upstream's version bump; this fork versions itself",
+      "implemented_in": [],
+      "triaged": "2026-09-12",
+      "source": "backfill"
+    },
+    {
+      "sha": "69b1874d0f16f8c80ad488b76f92b7965894d18e",
+      "date": "2026-10-08",
+      "subject": "Read appliance snapshots from the library and add a reauth flow (#159)",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "the rewrite onto frigidaire 1.0.0 from PyPI (#159), declined as a whole: 1.0.0 still has verify=False, disable_warnings at import, follows redirects, prints from the signature generator and writes the session file world-readable (audit C1, H1, H4, L3), and the password goes back into entry.data (H3); three library-independent pieces taken (native current_humidity, time-zone redaction, device model); its new entities are feature work for another day",
+      "implemented_in": [
+        "de4368acafbae1f76b4b1db77078794cf3e58c7d"
+      ],
+      "triaged": "2026-10-09",
+      "source": "backfill"
+    },
+    {
+      "sha": "3d1511de9db457b40b1427a9e32bf71ee65f5de2",
+      "date": "2026-10-08",
+      "subject": "Bump version to 0.1.51",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "upstream's version bump; this fork versions itself",
+      "implemented_in": [],
+      "triaged": "2026-10-09",
+      "source": "backfill"
+    }
+  ]
+}
