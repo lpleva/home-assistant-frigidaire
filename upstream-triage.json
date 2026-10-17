@@ -117,6 +117,61 @@
       "implemented_in": [],
       "triaged": "2026-10-09",
       "source": "backfill"
+    },
+    {
+      "sha": "e4b6502b661958fa12e0e4dffbd500c0b9b1fa0d",
+      "date": "2026-10-10",
+      "subject": "Ignore the scan date when deciding whether the deprecation issue needs a comment",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Edits upstream's daily deprecation-scanning GitHub workflow (a CI issue-comment bot), which this fork declined in 0.2.3; no integration code.",
+      "implemented_in": [],
+      "triaged": "2026-10-17",
+      "source": "triage"
+    },
+    {
+      "sha": "ea8d49660cd51570a53ac8cc7e179644788a3d85",
+      "date": "2026-10-10",
+      "subject": "Reload on options save via OptionsFlowWithReload instead of an update listener (#169)",
+      "bucket": "implement",
+      "status": "pending",
+      "reason": "HA compatibility: replaces the options update listener with OptionsFlowWithReload ahead of HA 2026.12, which stops reloading entries that carry a listener. Our reauth step relies on that listener to reload, so it must schedule the reload itself once the listener is gone; the hacs.json floor rises to 2025.8.0 because the new base class needs it.",
+      "implemented_in": [],
+      "triaged": "2026-10-17",
+      "source": "triage"
+    },
+    {
+      "sha": "55fc31b4f13816c14558dac4667e82197201dcae",
+      "date": "2026-10-10",
+      "subject": "Bump version to 0.1.52",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream version bump to 0.1.52; the fork keeps its own version line.",
+      "implemented_in": [],
+      "triaged": "2026-10-17",
+      "source": "triage"
+    },
+    {
+      "sha": "69ab87094acf8a270b7ba4fe3e1117f212459000",
+      "date": "2026-10-11",
+      "subject": "Load the session file in the executor during setup (#171)",
+      "bucket": "already_here",
+      "status": "already_here",
+      "reason": "Our async_setup_entry already reads the session file inside the setup() closure run by hass.async_add_executor_job, never on the event loop (since ceaeb1a, kept through the 0.2.0 audit rewrite 5637a9c); upstream's initial_session/session.py does not exist in our tree.",
+      "implemented_in": [],
+      "triaged": "2026-10-17",
+      "source": "triage"
+    },
+    {
+      "sha": "b41bc19ccda6c49d22ec686205d38ca5c7677c14",
+      "date": "2026-10-11",
+      "subject": "Bump version to 0.1.53",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream version bump to 0.1.53; the fork keeps its own version line.",
+      "implemented_in": [],
+      "triaged": "2026-10-17",
+      "source": "triage"
     }
   ]
 }
