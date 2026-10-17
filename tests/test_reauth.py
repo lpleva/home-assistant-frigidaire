@@ -4,6 +4,7 @@ import json
 from datetime import timedelta
 from unittest.mock import patch
 
+import pytest
 import requests
 
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
@@ -63,7 +64,7 @@ async def test_a_transient_failure_during_a_poll_does_not_start_a_reauth_flow(ha
 
 
 async def test_reauth_accepts_a_new_password_and_reloads_without_storing_it(
-    hass: HomeAssistant, setup_entry, tmp_path
+    hass: HomeAssistant, setup_entry, tmp_path, caplog: pytest.LogCaptureFixture
 ) -> None:
     entry, stub = await setup_entry([DEHUMIDIFIER])
     result = await entry.start_reauth_flow(hass)
@@ -77,12 +78,58 @@ async def test_reauth_accepts_a_new_password_and_reloads_without_storing_it(
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
+    # The entry data did not change here (the v1 password was already migrated away), so
+    # this reload is the flow's own, not a reaction to an update.
+    assert stub.closed is True
     assert entry.state is ConfigEntryState.LOADED
     # The password is verified and then dropped: only the username is persisted.
     assert dict(entry.data) == {"username": "user@example.com"}
     # The fresh session key lands in the entry's own file, which is what setup reads.
     stored = json.loads((tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json").read_text())
     assert stored["session_key"] == "stub-session-key"
+    assert "update listener" not in caplog.text
+
+
+async def test_reauth_that_changes_the_entry_reloads_it_too(
+    hass: HomeAssistant, frigidaire_stub, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A v2 entry that still holds a password: reauth drops it (an entry change) and must reload anyway.
+
+    Through 0.2.9 the update listener in __init__ did this reload; it is gone because Home Assistant
+    2026.12 stops reloading entries that carry one, so the flow schedules the reload itself.
+    """
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([DEHUMIDIFIER])
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={"username": "user@example.com", "password": "left-over"},
+        unique_id="user@example.com",
+        version=2,
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+    assert entry.data["password"] == "left-over"  # already v2, so the migration left it alone
+    assert entry.update_listeners == []
+
+    result = await entry.start_reauth_flow(hass)
+    with patch.object(
+        hass.config_entries, "async_schedule_reload", wraps=hass.config_entries.async_schedule_reload
+    ) as reload:
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"password": "a-new-password"})
+        await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert dict(entry.data) == {"username": "user@example.com"}
+    assert [call.args[0] for call in reload.call_args_list] == [entry.entry_id]
+    # The reload ran: the old client was closed by the unload and the entry is set up
+    # again on the fresh session key.
+    assert stub.closed is True
+    assert entry.state is ConfigEntryState.LOADED
+    stored = json.loads((tmp_path / ".storage" / f"frigidaire-{entry.entry_id}.json").read_text())
+    assert stored["session_key"] == "stub-session-key"
+    assert "update listener" not in caplog.text
 
 
 async def test_reauth_reports_a_still_wrong_password(hass: HomeAssistant, setup_entry) -> None:
