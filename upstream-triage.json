@@ -134,9 +134,13 @@
       "date": "2026-10-10",
       "subject": "Reload on options save via OptionsFlowWithReload instead of an update listener (#169)",
       "bucket": "implement",
-      "status": "pending",
+      "status": "implemented",
       "reason": "HA compatibility: replaces the options update listener with OptionsFlowWithReload ahead of HA 2026.12, which stops reloading entries that carry a listener. Our reauth step relies on that listener to reload, so it must schedule the reload itself once the listener is gone; the hacs.json floor rises to 2025.8.0 because the new base class needs it.",
-      "implemented_in": [],
+      "implemented_in": [
+        "2eb87e26f5f28c9a15325be33c0b176db96a2c62",
+        "34992e73ac04423fba47af9a6479acaf2831e435",
+        "9e90869932a3791006f26acbc39262c790a116f4"
+      ],
       "triaged": "2026-10-17",
       "source": "triage"
     },
