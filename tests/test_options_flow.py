@@ -1,15 +1,22 @@
 """Per-device options flow: enabling an optional entity creates it after reload."""
 
+import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 from payloads import DEHUMIDIFIER, LEGACY_AC
 
 
-async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, setup_entry) -> None:
-    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+async def test_enabling_check_filter_creates_binary_sensor(
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
     registry = er.async_get(hass)
     assert registry.async_get_entity_id("binary_sensor", "frigidaire", "DH-1_check_filter") is None
+    # The reload after saving is OptionsFlowWithReload's, not an update listener's:
+    # Home Assistant 2026.12 stops reloading entries that carry one.
+    assert entry.update_listeners == []
 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     assert result["type"] is FlowResultType.FORM
@@ -28,9 +35,14 @@ async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, 
 
     assert entry.options["DH-1"]["check_filter"] is True
     assert entry.options["AC-LEGACY-1"]["check_filter"] is False
+    # Saving reloaded the entry: the old client was closed by the unload, and the sensor
+    # the new options enable exists after the fresh setup.
+    assert stub.closed is True
+    assert entry.state is ConfigEntryState.LOADED
     sensor_id = registry.async_get_entity_id("binary_sensor", "frigidaire", "DH-1_check_filter")
     assert sensor_id is not None
     assert hass.states.get(sensor_id).state == "off"
+    assert "update listener" not in caplog.text
 
 
 async def test_air_conditioner_options_include_compressor_fields_and_serialize(

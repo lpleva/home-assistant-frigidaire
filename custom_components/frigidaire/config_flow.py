@@ -194,16 +194,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 # data, not data_updates: this also drops the plaintext password an
-                # older version of the integration left in the entry. The reload is
-                # not the flow's job: if the entry changed, the update listener in
-                # __init__ reloads it; if not, schedule one so the new session key is
-                # used. async_update_reload_and_abort would reload too, and Home
-                # Assistant 2026.12 stops doing that for entries with a listener.
-                if not self.hass.config_entries.async_update_entry(
-                    entry, data={CONF_USERNAME: self._reauth_username}
-                ):
-                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
+                # older version of the integration left in the entry. The flow
+                # schedules the reload itself, whether or not the entry changed:
+                # nothing else will, since __init__ no longer registers an update
+                # listener (Home Assistant 2026.12 stops reloading entries that have
+                # one), and the fresh session key is only picked up by a new setup.
+                return self.async_update_reload_and_abort(
+                    entry, data={CONF_USERNAME: self._reauth_username}, reason="reauth_successful"
+                )
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -229,10 +227,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for the frigidaire integration."""
+class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
+    """Handle options for the frigidaire integration.
+
+    OptionsFlowWithReload (Home Assistant 2025.8+): saving changed options reloads the
+    entry, so a newly enabled entity appears without an update listener in __init__.
+    """
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        # Only the id is kept: the base class forbids assigning config_entry, and its
+        # own config_entry property is not usable until the flow has a hass.
         self._entry_id = config_entry.entry_id
         self._appliances: list[frigidaire.Appliance] = []
         self._pending_appliances: list[frigidaire.Appliance] = []

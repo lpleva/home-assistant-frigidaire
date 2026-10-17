@@ -156,14 +156,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    # No update listener here, on purpose. The options flow subclasses
+    # OptionsFlowWithReload, so Home Assistant reloads the entry itself when options
+    # are saved, and the reauth step schedules its own reload. An entry that carries a
+    # listener is not reloaded by either from Home Assistant 2026.12 on.
 
     return True
-
-
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when options change so switch selection takes effect."""
-    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
