@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Saving options reloads the entry through Home Assistant's `OptionsFlowWithReload` instead of an update listener registered in `__init__`, and re-authentication now schedules its own reload whether or not the entry changed (when it did change, the listener used to do it). Home Assistant 2026.12 stops reloading entries that carry an update listener, from the options flow and from a reauth flow alike, so the 0.2.3 arrangement would have stopped working then. Re-implemented from upstream #169 (ea8d49660), not merged. The minimum Home Assistant in `hacs.json` rises from 0.96.0 to 2025.8.0, the first release with `OptionsFlowWithReload`. One test added, two extended: no "update listener" warning is logged, a reauth that changes the entry still ends with the entry loaded on the fresh session key, and saving options still reloads.
+
 ## 0.2.9
 
 - A network outage during the session refresh is reported as an outage, not as an expired login. On 2026-10-09 at 8:47 AM a two-minute router reboot hit a poll: the request timed out, the retry could not connect, and the client's re-authentication tried the refresh token, could not reach Electrolux, then fell through to "Session expired and no password is held" (`reauth_required`, status 401) for a session that was fine. It now raises `error_code="network_unreachable"` with no status code, chained to the transport error, so the coordinator backs off and retries on the next poll. The refresh token is kept, and the session key that re-authentication cleared is put back. An outage while checking a cached key also keeps the key instead of dropping it. A refresh token Electrolux actually refuses (401, `invalid_grant`) still asks for the password. Four tests.
