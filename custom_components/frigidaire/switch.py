@@ -10,10 +10,10 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .vendor import frigidaire
 from .vendor.frigidaire import Component, Detail, Setting
@@ -90,7 +90,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], SwitchEntity):
+class FrigidaireSwitch(FrigidaireEntity, SwitchEntity):
     """A switch for a single Frigidaire boolean setting."""
 
     _attr_has_entity_name = True

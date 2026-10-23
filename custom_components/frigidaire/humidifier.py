@@ -21,10 +21,10 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .parsers import bucket_is_full, filter_needs_attention, humidity_percent, normalize_alerts
 from .vendor import frigidaire
@@ -94,7 +94,7 @@ FRIGIDAIRE_TO_HA_FAN_MODE = {
 HA_TO_FRIGIDAIRE_FAN_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_FAN_MODE.items()}
 
 
-class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], HumidifierEntity):
+class FrigidaireDehumidifier(FrigidaireEntity, HumidifierEntity):
     """Representation of a Frigidaire dehumidifier."""
 
     _attr_has_entity_name = True

@@ -23,10 +23,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import CONF_FILTER_RUNTIME_SENSOR, DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import normalize_enum_value, suggest_area
 from .parsers import (
     AIR_FILTER_LIFETIME_KEY,
@@ -156,7 +156,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
+class FrigidaireTemperatureSensor(FrigidaireEntity, SensorEntity):
     """Ambient temperature reported by a Frigidaire dehumidifier."""
 
     _attr_has_entity_name = True
@@ -207,7 +207,7 @@ class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
         return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
 
 
-class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
+class FrigidaireFilterRuntimeSensor(FrigidaireEntity, SensorEntity):
     """Report cumulative air-filter runtime from the owning appliance entity."""
 
     _attr_has_entity_name = True
@@ -243,7 +243,7 @@ class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordin
         return self._runtime_seconds
 
 
-class FrigidaireDetailSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
+class FrigidaireDetailSensor(FrigidaireEntity, SensorEntity):
     """A sensor backed by a single reported detail, described by SENSOR_DESCRIPTIONS."""
 
     _attr_has_entity_name = True

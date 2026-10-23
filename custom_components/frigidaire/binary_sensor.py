@@ -20,6 +20,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import suggest_area
 from .parsers import bucket_is_full, filter_needs_attention, normalize_alerts, normalize_filter_state
 from .vendor import frigidaire
@@ -65,9 +66,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
     """Binary sensor that is ON while the cloud reports the appliance as connected.
 
-    This distinguishes a genuinely offline appliance from one whose reported values have
-    simply gone stale — the rest of the integration cannot tell the difference, because a
-    disconnected appliance keeps returning its last-known reported properties.
+    A disconnected appliance keeps returning its last-known reported properties, so every
+    other entity goes unavailable while this one reads "off" (see FrigidaireEntity). This
+    is the one entity that deliberately stays available while the appliance is
+    unreachable: it is built on CoordinatorEntity directly, not FrigidaireEntity.
     """
 
     # has_entity_name: Home Assistant prefixes the device name, so this entity reads as
@@ -107,7 +109,7 @@ class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordina
         return self.coordinator.is_connected
 
 
-class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
+class FrigidaireCheckFilterSensor(FrigidaireEntity, BinarySensorEntity):
     """Binary sensor that is ON when the filter needs attention."""
 
     _attr_has_entity_name = True
@@ -149,7 +151,7 @@ class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
         return filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE))
 
 
-class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
+class FrigidaireBucketStatusSensor(FrigidaireEntity, BinarySensorEntity):
     """Binary sensor that is ON when the dehumidifier's water bucket is full.
 
     Displayed states are "Full" (on) and "Empty" (off) via the bucket_status
@@ -202,7 +204,7 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
         return "mdi:water-alert" if self.is_on else "mdi:cup-water"
 
 
-class FrigidaireCompressorEstimateSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
+class FrigidaireCompressorEstimateSensor(FrigidaireEntity, BinarySensorEntity):
     """Expose the coordinator's opt-in compressor estimate."""
 
     _attr_has_entity_name = True

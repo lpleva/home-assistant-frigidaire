@@ -10,10 +10,10 @@ from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import normalize_enum_value, suggest_area
 from .vendor import frigidaire
 
@@ -37,7 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities)
 
 
-class FrigidaireTimerNumber(CoordinatorEntity[FrigidaireApplianceCoordinator], NumberEntity):
+class FrigidaireTimerNumber(FrigidaireEntity, NumberEntity):
     """AC ON or OFF timer, expressed in seconds with 30-minute steps."""
 
     _attr_has_entity_name = True

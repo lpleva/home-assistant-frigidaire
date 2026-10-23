@@ -26,10 +26,10 @@ from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .entity import FrigidaireEntity
 from .helpers import execute_or_raise, normalize_enum_value, suggest_area
 from .parsers import filter_needs_attention, normalize_alerts
 from .vendor import frigidaire
@@ -123,7 +123,7 @@ HA_TO_FRIGIDAIRE_PRESET = {
 OPTIMISTIC_WINDOW = 5  # seconds
 
 
-class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], ClimateEntity):
+class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
     _attr_has_entity_name = True
