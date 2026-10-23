@@ -62,7 +62,7 @@ cloud response the climate and dehumidifier entities already use.
 | Humidity | Humidity sensor | Room relative humidity, on appliances with a humidity sensor (including some ACs) |
 | PM2.5 | PM2.5 sensor | Particulate concentration in µg/m³, on appliances with an air-quality sensor |
 | Wi-Fi Signal | Signal strength sensor | RSSI in dBm plus a `link_quality` attribute. Diagnostic and **disabled by default** — enable it from the device page when troubleshooting |
-| Connectivity | Connectivity binary sensor | Whether the cloud can currently reach the appliance. Worth alerting on: a disconnected appliance keeps serving its last-known values, so every other entity looks healthy while its data silently goes stale |
+| Connectivity | Connectivity binary sensor | Whether the cloud can currently reach the appliance. A disconnected appliance keeps serving its last-known values, so while this reads off every other entity of that appliance is unavailable rather than showing stale data; this is the one entity that stays available to say so. Models that report no connection state get no sensor and keep their entities available |
 
 `pm10` is deliberately **not** exposed. On the appliances observed so far it alternates
 between a fixed placeholder value and a value identical to `pm25`, so it carries no
