@@ -43,6 +43,14 @@ def test_parse_version_orders_releases_numerically() -> None:
     assert check.parse_version("2025.8.0") < check.parse_version("2026.9.0")
 
 
+def test_parse_version_tolerates_a_prerelease() -> None:
+    """A development build of Home Assistant must compare (and be skipped), not raise."""
+    assert check.parse_version("2026.11.0.dev0") == (2026, 11, 0)
+    assert check.parse_version("2026.11.0b1") == (2026, 11, 0)
+    assert check.parse_version("2026.11.0rc2") == (2026, 11, 0)
+    assert check.parse_version("2026.11.0.dev0") > check.parse_version("2026.10.3")
+
+
 def test_finds_names_imported_directly_and_through_a_module() -> None:
     source = (
         "from homeassistant import config_entries\n"
@@ -67,7 +75,7 @@ def test_a_minimum_older_than_an_imported_name_fails(tmp_path: Path, capsys: pyt
     )
     assert check.static_check(hacs_json, integration) == 1
     out = capsys.readouterr().out
-    assert "sensor.py imports homeassistant.const.UnitOfDensity, added in Home Assistant 2026.9.0" in out
+    assert "sensor.py imports homeassistant.const.UnitOfDensity, added in Home Assistant 2026.7.0" in out
 
 
 def test_a_minimum_at_or_above_every_imported_name_passes(tmp_path: Path) -> None:
@@ -96,7 +104,10 @@ def test_this_repo_imports_nothing_newer_than_its_hacs_json_minimum() -> None:
 def test_the_hacs_json_minimum_is_a_release_version() -> None:
     minimum = json.loads(HACS_JSON.read_text())["homeassistant"]
     assert len(minimum.split(".")) == 3, "hacs.json wants year.month.patch"
-    assert check.parse_version(minimum) >= (2026, 9, 0), "sensor.py imports UnitOfDensity, added in 2026.9"
+    newest_needed = max(check.FIRST_RELEASE.values(), key=check.parse_version)
+    assert check.parse_version(minimum) >= check.parse_version(
+        newest_needed
+    ), f"the code imports a name added in Home Assistant {newest_needed}"
 
 
 def test_every_module_imports_on_the_minimum_release() -> None:

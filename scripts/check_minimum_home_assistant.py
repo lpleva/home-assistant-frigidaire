@@ -2,8 +2,8 @@
 
 HACS offers a release to every install at or above the ``homeassistant`` version in
 ``hacs.json`` and turns older installs away, so that field is a promise: the integration
-loads on that release. Nothing enforced it. 0.2.x started importing ``UnitOfDensity``,
-which core only gained in 2026.9, while ``hacs.json`` still said 2025.8.0, so an install
+loads on that release. Nothing enforced it. 0.2.0 started importing ``UnitOfDensity``,
+which core only gained in 2026.7, while ``hacs.json`` still said 2025.8.0, so an install
 in between would have been offered a release that fails at import time.
 
 Two checks, both run from the repo root:
@@ -31,6 +31,7 @@ import ast
 import importlib
 import importlib.util
 import json
+import re
 import sys
 import traceback
 from pathlib import Path
@@ -44,14 +45,27 @@ HACS_JSON = REPO_ROOT / "hacs.json"
 # test suite then fails until hacs.json's minimum is at least that release.
 FIRST_RELEASE: dict[str, str] = {
     "homeassistant.config_entries.OptionsFlowWithReload": "2025.8.0",
-    "homeassistant.const.UnitOfDensity": "2026.9.0",
+    "homeassistant.const.UnitOfDensity": "2026.7.0",
 }
 
 
 def parse_version(version: str) -> tuple[int, ...]:
-    """``"2026.9.0"`` -> ``(2026, 9, 0)``; a missing patch counts as 0, so ``2026.9`` == ``2026.9.0``."""
-    parts = tuple(int(piece) for piece in version.split("."))
-    return parts + (0,) * (3 - len(parts))
+    """``"2026.9.0"`` -> ``(2026, 9, 0)``.
+
+    A missing patch counts as 0, so ``2026.9`` == ``2026.9.0``. Only the leading integer groups
+    count: a prerelease like ``2026.11.0.dev0`` or ``2026.11.0b1`` is ``(2026, 11, 0)``, so an
+    installed development build compares (and gets skipped) instead of raising.
+    """
+    parts: list[int] = []
+    for piece in version.split("."):
+        match = re.match(r"\d+", piece)
+        if match is None:
+            break  # "dev0", "rc1": the numeric prefix is complete
+        parts.append(int(match.group()))
+        if match.end() != len(piece):
+            break  # "0b1": digits then a suffix, nothing numeric follows
+    parts = parts[:3]
+    return tuple(parts) + (0,) * (3 - len(parts))
 
 
 def minimum_version(hacs_json: Path = HACS_JSON) -> str:
