@@ -205,8 +205,10 @@
       "subject": "Raise the minimum Home Assistant to 2026.9 and check it in CI (#177)",
       "bucket": "implement",
       "status": "implemented",
-      "reason": "Take the hacs.json minimum rise from 2025.8.0 to 2026.9.0 and the stdlib import-check script: our sensor.py also imports UnitOfDensity, which core only gained in 2026.9, so our hacs.json currently promises a version the code does not load on (harmless for our Core 2026.10.2). The new GitHub Actions job is CI-only and is not taken.",
+      "reason": "Take the hacs.json minimum rise from 2025.8.0 to 2026.9.0 and the stdlib import-check script. Our sensor.py also imports UnitOfDensity, which core gained in 2026.7.0 (absent from every 2026.6.x tag; upstream's own claim of 2026.9 was wrong), so our hacs.json promised a version the code does not load on (harmless for our Core 2026.10.2). 2026.9.0 matches upstream's hacs.json and is stricter than the code needs. The new GitHub Actions job is CI-only and is not taken.",
       "implemented_in": [
+        "052b509ffb62a6a2e1ed649e739b0a14519c16b1",
+        "0ab75781a60a6822609f60b224c6e0017c1937ab",
         "89ad7fb31c16eb3adafe057463b9776c1018b0fc",
         "b1c1be1e40af6cdf89ae13189a86fc5e7c78a3ba",
         "f892f9cdd52eeb5579da6d6b877fad87e2adf08e"
