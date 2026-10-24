@@ -176,6 +176,50 @@
       "implemented_in": [],
       "triaged": "2026-10-17",
       "source": "triage"
+    },
+    {
+      "sha": "38a15249d9d590eff4ce5622b056a4604e8a0c74",
+      "date": "2026-10-18",
+      "subject": "Add opt-in heat mode for confirmed heat-capable appliances (#175)",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Adds an opt-in Heat mode to the air-conditioner climate entity only; we have no Frigidaire AC or heat-capable unit, and it also bumps the PyPI frigidaire pin (1.0.0 to 1.0.1) that our vendored client replaces. Revisit if you add one.",
+      "implemented_in": [],
+      "triaged": "2026-10-24",
+      "source": "triage"
+    },
+    {
+      "sha": "39e20730a6cb5beb85b7b6ada924d71a791ad13e",
+      "date": "2026-10-18",
+      "subject": "Bump version to 0.1.54",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream's automated version bump to 0.1.54 in manifest.json; our fork keeps its own version numbers.",
+      "implemented_in": [],
+      "triaged": "2026-10-24",
+      "source": "triage"
+    },
+    {
+      "sha": "1e22d8be867d384337f44c38087a38de85187d86",
+      "date": "2026-10-18",
+      "subject": "Raise the minimum Home Assistant to 2026.9 and check it in CI (#177)",
+      "bucket": "implement",
+      "status": "pending",
+      "reason": "Take the hacs.json minimum rise from 2025.8.0 to 2026.9.0 and the stdlib import-check script: our sensor.py also imports UnitOfDensity, which core only gained in 2026.9, so our hacs.json currently promises a version the code does not load on (harmless for our Core 2026.10.2). The new GitHub Actions job is CI-only and is not taken.",
+      "implemented_in": [],
+      "triaged": "2026-10-24",
+      "source": "triage"
+    },
+    {
+      "sha": "ce76a4dcd0f2f39354de3bf106484e5007b4c7c4",
+      "date": "2026-10-18",
+      "subject": "Bump version to 0.1.55",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream's automated version bump to 0.1.55 in manifest.json; our fork keeps its own version numbers.",
+      "implemented_in": [],
+      "triaged": "2026-10-24",
+      "source": "triage"
     }
   ]
 }
