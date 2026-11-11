@@ -731,21 +731,25 @@ def _body_lines(caplog) -> list[str]:
 
 def test_a_206_partial_appliance_list_is_refused_not_returned(caplog) -> None:
     caplog.set_level(logging.DEBUG)
-    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)]))
+    partial = FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), partial]))
 
     with pytest.raises(frigidaire.FrigidaireException) as excinfo:
         client.get_request(client.regional_base_url, _APPLIANCES_PATH, client.get_headers_frigidaire("GET", True))
 
     assert excinfo.value.status_code == 206
     # The 0.2.7 body-free detail line stays: the status and the byte count, which is how a 206 is counted.
-    (warning,) = [r for r in caplog.records if "Error processing request" in r.getMessage()]
+    warnings = [r for r in caplog.records if "Error processing request" in r.getMessage()]
+    assert len(warnings) == 1
+    warning = warnings[0]
     assert warning.levelno == logging.WARNING
     assert "detail=Request failed with status 206 (error=None, " in warning.getMessage()
 
 
 def test_a_206_body_is_no_longer_logged(caplog) -> None:
     caplog.set_level(logging.DEBUG)
-    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)]))
+    partial = FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), partial]))
 
     with pytest.raises(frigidaire.FrigidaireException):
         client.get_request(client.regional_base_url, _APPLIANCES_PATH, {})

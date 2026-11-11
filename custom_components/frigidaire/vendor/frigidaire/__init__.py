@@ -177,72 +177,6 @@ def _transient_outage(during: str, err: BaseException) -> "FrigidaireException":
     )
 
 
-# --- TEMPORARY 206 diagnostic (0.2.9) ------------------------------------------------
-# TEMPORARY: remove this block, and its call in get_request, once a 206 body has been
-# captured and the accept-or-refuse decision on 206 is made.
-# Electrolux sometimes answers the appliance-list poll (GET /appliance/api/v2/appliances,
-# behind both "Error fetching frigidaire account data" and "Error requesting frigidaire
-# Dehumidifier data") with HTTP 206, about 715 bytes, error=None. The client still treats
-# it as a failure; this only logs what it carried, plus one normal 200 body of the same
-# request per Home Assistant run to compare against. Only that GET is covered: never the
-# auth/token endpoints, never request headers. Any key that looks like a credential is
-# redacted, at any depth.
-_DIAG_PATH_PREFIX = "/appliance/api/v2/appliances"
-_DIAG_SECRET_KEY_RE = re.compile(r"token|password|secret", re.IGNORECASE)
-_DIAG_SECRET_TEXT_RE = re.compile(
-    r'("[^"]*(?:token|password|secret)[^"]*"\s*:\s*)("(?:[^"\\]|\\.)*"|[^,}\]\s]+)', re.IGNORECASE
-)
-_diag_logged_200 = False
-
-
-def _diag_redact(value):
-    if isinstance(value, dict):
-        return {
-            k: ("<redacted>" if isinstance(k, str) and _DIAG_SECRET_KEY_RE.search(k) else _diag_redact(v))
-            for k, v in value.items()
-        }
-    if isinstance(value, list):
-        return [_diag_redact(v) for v in value]
-    return value
-
-
-def _diag_body_text(response: Response) -> str:
-    """The body as redacted text: JSON is redacted by key, anything else by pattern."""
-    raw = response.content or b""
-    try:
-        raw = gzip.decompress(raw)
-    except (OSError, EOFError):
-        pass
-    text = raw.decode("utf-8", errors="replace")
-    try:
-        return json.dumps(_diag_redact(json.loads(text)), separators=(",", ":"))
-    except ValueError:
-        return _DIAG_SECRET_TEXT_RE.sub(r'\1"<redacted>"', text)
-
-
-def _diag_log_appliance_list_body(method: str, path: str, response: Response) -> None:
-    """TEMPORARY 206 diagnostic; see the block comment above."""
-    global _diag_logged_200
-    if method != "GET" or not path.startswith(_DIAG_PATH_PREFIX) or "/command" in path:
-        return
-    status = getattr(response, "status_code", None)
-    try:
-        if status == 206:
-            _LOGGER.warning(
-                "Frigidaire 206 body (temporary diagnostic): GET %s, %d bytes: %s",
-                path, len(response.content or b""), _diag_body_text(response),
-            )
-        elif status == 200 and not _diag_logged_200:
-            _diag_logged_200 = True
-            _LOGGER.warning(
-                "Frigidaire 200 body for comparison, once per run (temporary diagnostic): GET %s, %d bytes: %s",
-                path, len(response.content or b""), _diag_body_text(response),
-            )
-    except Exception:  # a diagnostic must never break a poll
-        _LOGGER.debug("Frigidaire temporary diagnostic could not log a body", exc_info=True)
-# --- end TEMPORARY 206 diagnostic -------------------------------------------------------
-
-
 _SAFE_DETAIL_PREFIXES = ("Request failed with status", "Received an unexpected response")
 
 
@@ -1254,8 +1188,10 @@ class Frigidaire:
         safe_payload = _redact_payload(payload)
         # parse_response's own messages are body-free by construction (status, the
         # platform error code and a byte count, never the body), so they are safe to
-        # log and are the only way to tell a 206 that carried the appliance list from
-        # a 206 stub (2026-09-19: two of them were thrown away unseen). Any other
+        # log, and the byte count is how a 206 is recognised. A 206 on the appliance list
+        # is a partial list (captured 2026-11-10 and 11-11: about 717 bytes against about
+        # 2,610 for a 200, with 4 of the 28 reported properties and no mode, state or
+        # target humidity), so it stays a failure and the next poll retries. Any other
         # exception text stays out, since requests can embed the response.
         detail = str(e) if isinstance(e, FrigidaireException) and str(e).startswith(_SAFE_DETAIL_PREFIXES) else ""
         error_str = (
@@ -1297,7 +1233,6 @@ class Frigidaire:
             # password. Electrolux does not redirect in this flow, so a 3xx is an error
             # and parse_response reports it as one.
             response = self._session.get(full_url, headers=headers, allow_redirects=False)
-            _diag_log_appliance_list_body("GET", path, response)  # TEMPORARY 206 diagnostic
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "GET", f"{url}{path}", headers, "")
