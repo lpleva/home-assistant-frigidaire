@@ -687,74 +687,84 @@ def test_a_genuine_refusal_of_the_refresh_token_still_asks_for_reauth(body) -> N
     assert client.refresh_token is None
 
 
-# --- 0.2.9: TEMPORARY 206 diagnostic (remove with the code once a 206 body is captured) --
+# --- 206 on the appliance list: refused, and no body is ever logged ----------------------
+# 2026-11-11 verdict on the bodies the 0.2.9 diagnostic captured: a 206 is a PARTIAL
+# appliance list. Same envelope as a 200, but `properties.reported` held 4 of the 28
+# properties (temperature, humidity, bucket, network) and none of mode, applianceState,
+# targetHumidity, fanSpeedSetting, filterState or uiLockMode. Different shape, so per
+# Lukas's rule (2026-10-09) a 206 stays a failure and the next poll retries.
 
 _APPLIANCES_PATH = "/appliance/api/v2/appliances?includeMetadata=true"
 
 
-@pytest.fixture
-def fresh_diag(monkeypatch):
-    monkeypatch.setattr(frigidaire, "_diag_logged_200", False)
+def _appliance_list(reported: dict) -> list[dict]:
+    return [{
+        "applianceId": "DH-1",
+        "applianceData": {"applianceName": "Dehumidifier", "created": "2026-01-01", "modelName": "DH"},
+        "connectionState": "Connected",
+        "status": "enabled",
+        "properties": {"desired": {}, "metadata": {}, "metadataDesired": {}, "reported": reported},
+    }]
 
 
-def _diag_messages(caplog) -> list[str]:
-    return [r.message for r in caplog.records if "temporary diagnostic" in r.message]
+_PARTIAL_REPORTED = {
+    "ambientTemperatureC": 20,
+    "networkInterface": {"linkQualityIndicator": "GOOD", "rssi": -50},
+    "sensorHumidity": 48,
+    "waterTankFull": "EMPTY",
+}
+_FULL_REPORTED = {
+    **_PARTIAL_REPORTED,
+    "applianceState": "RUNNING",
+    "mode": "DRY",
+    "targetHumidity": 50,
+    "fanSpeedSetting": "LOW",
+    "filterState": "GOOD",
+    "uiLockMode": False,
+}
 
 
-def test_a_206_logs_its_full_body_with_credentials_redacted(caplog, fresh_diag) -> None:
-    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
-    body = {"status": "partial", "items": [{"applianceId": "DH-1", "accessToken": "SEKRIT-A"}], "refresh_token": "SEKRIT-R", "nested": {"password": "SEKRIT-P"}}
-    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(body, status_code=206)]))
+def _body_lines(caplog) -> list[str]:
+    """Any log line, at any level, that carries a reading from a response body."""
+    return [r.getMessage() for r in caplog.records if "sensorHumidity" in r.getMessage() or "DH-1" in r.getMessage()]
 
-    with pytest.raises(frigidaire.FrigidaireException):
+
+def test_a_206_partial_appliance_list_is_refused_not_returned(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)]))
+
+    with pytest.raises(frigidaire.FrigidaireException) as excinfo:
         client.get_request(client.regional_base_url, _APPLIANCES_PATH, client.get_headers_frigidaire("GET", True))
 
-    records = [r for r in caplog.records if "Frigidaire 206 body (temporary diagnostic)" in r.message]
-    assert len(records) == 1 and records[0].levelno == logging.WARNING
-    msg = records[0].message
-    assert '"applianceId":"DH-1"' in msg and '"status":"partial"' in msg
-    assert "SEKRIT" not in msg and msg.count("<redacted>") == 3
-    assert "cached-key" not in msg and "Bearer" not in msg  # no request headers
+    assert excinfo.value.status_code == 206
+    # The 0.2.7 body-free detail line stays: the status and the byte count, which is how a 206 is counted.
+    (warning,) = [r for r in caplog.records if "Error processing request" in r.getMessage()]
+    assert warning.levelno == logging.WARNING
+    assert "detail=Request failed with status 206 (error=None, " in warning.getMessage()
 
 
-def test_a_non_json_206_is_logged_raw_with_token_patterns_redacted(caplog, fresh_diag) -> None:
-    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
-    raw = b'{"items": [ {"id": 1, "accessToken": "SEKRIT"'  # truncated JSON
-    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(None, status_code=206, content=raw)]))
+def test_a_206_body_is_no_longer_logged(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)]))
 
     with pytest.raises(frigidaire.FrigidaireException):
         client.get_request(client.regional_base_url, _APPLIANCES_PATH, {})
 
-    (msg,) = _diag_messages(caplog)
-    assert '"items": [ {"id": 1' in msg and "SEKRIT" not in msg and "<redacted>" in msg
+    assert _body_lines(caplog) == []
+    assert not [r for r in caplog.records if "temporary diagnostic" in r.getMessage()]
 
 
-def test_one_200_body_is_logged_per_run_for_comparison(caplog, fresh_diag) -> None:
-    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
-    ok = [{"applianceId": "DH-1", "properties": {"reported": {"sensorHumidity": 45}}}]
+def test_a_200_appliance_list_is_returned_whole_and_logs_nothing(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    ok = _appliance_list(_FULL_REPORTED)
     client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(ok), FakeResponse(ok)]))
 
     assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
     assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
 
-    msgs = _diag_messages(caplog)
-    assert len(msgs) == 1
-    assert msgs[0].startswith("Frigidaire 200 body for comparison") and '"sensorHumidity":45' in msgs[0]
+    assert _body_lines(caplog) == []
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
-def test_the_diagnostic_never_logs_other_requests(caplog, fresh_diag) -> None:
-    caplog.set_level(logging.DEBUG, logger="vendor.frigidaire")
-    client = _client()  # __init__'s test_connection GET (users/current) returned 200
-    client._session = RecordingSession([
-        FakeResponse({"accessToken": "SEKRIT"}, status_code=206),
-        FakeResponse({"accessToken": "SEKRIT"}),
-        FakeResponse({"ok": True}, status_code=206),
-    ])
-    with pytest.raises(frigidaire.FrigidaireException):
-        client.post_request(client.regional_base_url, "/one-account-authorization/api/v1/token", {}, {})
-    client.post_request(client.regional_base_url, "/one-account-authorization/api/v1/token", {}, {})
-    with pytest.raises(frigidaire.FrigidaireException):
-        client.put_request(client.regional_base_url, "/appliance/api/v2/appliances/DH-1/command", {}, {"x": 1})
-
-    assert _diag_messages(caplog) == []
-    assert frigidaire._diag_logged_200 is False  # the users/current 200 did not use up the one
+def test_the_temporary_206_diagnostic_is_gone() -> None:
+    assert [name for name in vars(frigidaire) if name.lower().startswith("_diag")] == []
