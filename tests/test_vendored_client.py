@@ -724,9 +724,32 @@ _FULL_REPORTED = {
 }
 
 
-def _body_lines(caplog) -> list[str]:
-    """Any log line, at any level, that carries a reading from a response body."""
-    return [r.getMessage() for r in caplog.records if "sensorHumidity" in r.getMessage() or "DH-1" in r.getMessage()]
+def _body_tokens(value) -> set[str]:
+    """Every key and every string value in a response body, at any depth."""
+    if isinstance(value, dict):
+        return set(value) | {t for v in value.values() for t in _body_tokens(v)}
+    if isinstance(value, list):
+        return {t for v in value for t in _body_tokens(v)}
+    return {value} if isinstance(value, str) else set()
+
+
+def _leaked(caplog, body) -> list[str]:
+    """What the log carries of a response body, at any level, tracebacks included.
+
+    Every key and string value of the body is looked for, and the body's JSON in both
+    spacings. "status" is the one key left out: the body-free detail line says
+    "Request failed with status 206", which is not the body.
+    """
+    text = caplog.text
+    found = sorted(token for token in _body_tokens(body) - {"status"} if token in text)
+    found += [form for form in (json.dumps(body), json.dumps(body, separators=(",", ":"))) if form in text]
+    return found
+
+
+def test_the_leak_check_itself_catches_a_logged_body(caplog) -> None:
+    caplog.set_level(logging.DEBUG)
+    logging.getLogger("vendor.frigidaire").debug("body: %s", json.dumps(_appliance_list(_PARTIAL_REPORTED)))
+    assert "sensorHumidity" in _leaked(caplog, _appliance_list(_PARTIAL_REPORTED))
 
 
 def test_a_206_partial_appliance_list_is_refused_not_returned(caplog) -> None:
@@ -741,24 +764,42 @@ def test_a_206_partial_appliance_list_is_refused_not_returned(caplog) -> None:
     # The 0.2.7 body-free detail line stays: the status and the byte count, which is how a 206 is counted.
     warnings = [r for r in caplog.records if "Error processing request" in r.getMessage()]
     assert len(warnings) == 1
-    warning = warnings[0]
-    assert warning.levelno == logging.WARNING
-    assert "detail=Request failed with status 206 (error=None, " in warning.getMessage()
+    assert warnings[0].levelno == logging.WARNING
+    assert "detail=Request failed with status 206 (error=None, " in warnings[0].getMessage()
 
 
-def test_a_206_body_is_no_longer_logged(caplog) -> None:
+@pytest.mark.parametrize("status_code", [206, 503])
+def test_a_206_is_retried_within_the_poll_exactly_like_any_other_refused_answer(status_code) -> None:
+    """One retry on the same session, no new login, and the caller gets the full list."""
+    ok = _appliance_list(_FULL_REPORTED)
+    refused = FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=status_code)
+    session = RecordingSession([FakeResponse({"userId": "u"}), refused, FakeResponse(ok)])
+    client = _client(session)
+
+    assert client.get_appliances_raw() == ok
+
+    list_calls = [(method, url) for method, url, _ in session.calls if _APPLIANCES_PATH in url]
+    assert list_calls == [("GET", client.regional_base_url + _APPLIANCES_PATH)] * 2
+    assert [method for method, _, _ in session.calls if method != "GET"] == []  # no re-login
+    assert client.session_key == "cached-key"
+
+
+@pytest.mark.parametrize("status_code", [206, 200])
+def test_no_part_of_an_appliance_list_body_is_logged_at_any_level(caplog, status_code) -> None:
     caplog.set_level(logging.DEBUG)
-    partial = FakeResponse(_appliance_list(_PARTIAL_REPORTED), status_code=206)
-    client = _client(RecordingSession([FakeResponse({"userId": "u"}), partial]))
+    body = _appliance_list(_PARTIAL_REPORTED if status_code == 206 else _FULL_REPORTED)
+    client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(body, status_code=status_code)]))
 
-    with pytest.raises(frigidaire.FrigidaireException):
-        client.get_request(client.regional_base_url, _APPLIANCES_PATH, {})
+    if status_code == 200:
+        assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == body
+    else:
+        with pytest.raises(frigidaire.FrigidaireException):
+            client.get_request(client.regional_base_url, _APPLIANCES_PATH, {})
 
-    assert _body_lines(caplog) == []
-    assert not [r for r in caplog.records if "temporary diagnostic" in r.getMessage()]
+    assert _leaked(caplog, body) == []
 
 
-def test_a_200_appliance_list_is_returned_whole_and_logs_nothing(caplog) -> None:
+def test_a_200_appliance_list_is_returned_whole_every_time_without_a_warning(caplog) -> None:
     caplog.set_level(logging.DEBUG)
     ok = _appliance_list(_FULL_REPORTED)
     client = _client(RecordingSession([FakeResponse({"userId": "u"}), FakeResponse(ok), FakeResponse(ok)]))
@@ -766,9 +807,5 @@ def test_a_200_appliance_list_is_returned_whole_and_logs_nothing(caplog) -> None
     assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
     assert client.get_request(client.regional_base_url, _APPLIANCES_PATH, {}) == ok
 
-    assert _body_lines(caplog) == []
+    assert _leaked(caplog, ok) == []
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
-
-
-def test_the_temporary_206_diagnostic_is_gone() -> None:
-    assert [name for name in vars(frigidaire) if name.lower().startswith("_diag")] == []

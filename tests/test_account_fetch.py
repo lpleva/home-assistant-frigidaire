@@ -189,3 +189,37 @@ async def test_record_without_an_appliance_id_is_skipped(
     humidifier = hass.states.get(er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1"))
     assert humidifier.attributes["humidity"] == 42
     assert "Unexpected error" not in caplog.text
+
+
+@pytest.mark.parametrize("status_code", [206, 503])
+async def test_a_206_poll_is_a_failed_poll_like_any_other_and_the_next_poll_recovers(
+    hass: HomeAssistant, setup_entry, status_code: int
+) -> None:
+    """A 206 is a partial appliance list (2026-11-11), so it is never shown; the poll is retried."""
+    entry, stub = await setup_entry([DEHUMIDIFIER])
+    before = hass.states.get(er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1"))
+    account = hass.data[DOMAIN][entry.entry_id]["account"]
+    data_before = account.data
+
+    # What the vendored client raises for a refused answer (test_vendored_client.py pins it).
+    stub.details_error = frigidaire.FrigidaireException(
+        f"Request failed with status {status_code} (error=None, 717 bytes)", status_code=status_code
+    )
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert state_of(hass, "humidifier", "DH-1") == "unavailable"
+    assert account.last_update_success is False
+    assert account.data == data_before  # nothing from the refused answer replaced the last good list
+    assert account.update_interval == timedelta(seconds=30)  # first failure: retry at the normal pace
+    assert not hass.config_entries.flow.async_progress()  # no password prompt
+
+    stub.details_error = None
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=62))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    after = hass.states.get(er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1"))
+    assert stub.raw_fetch_count == 3
+    assert account.last_update_success is True
+    assert (after.state, after.attributes) == (before.state, before.attributes)

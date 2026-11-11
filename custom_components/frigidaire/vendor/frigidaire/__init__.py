@@ -1188,11 +1188,9 @@ class Frigidaire:
         safe_payload = _redact_payload(payload)
         # parse_response's own messages are body-free by construction (status, the
         # platform error code and a byte count, never the body), so they are safe to
-        # log, and the byte count is how a 206 is recognised. A 206 on the appliance list
-        # is a partial list (captured 2026-11-10 and 11-11: about 717 bytes against about
-        # 2,610 for a 200, with 4 of the 28 reported properties and no mode, state or
-        # target humidity), so it stays a failure and the next poll retries. Any other
-        # exception text stays out, since requests can embed the response.
+        # log. A 206 on the appliance list is a partial list, so it stays a failure and is
+        # retried (see the 206 entry in CHANGELOG.md). Any other exception text stays out, since requests
+        # can embed the response.
         detail = str(e) if isinstance(e, FrigidaireException) and str(e).startswith(_SAFE_DETAIL_PREFIXES) else ""
         error_str = (
             f"Error processing request ({type(e).__name__}):\n"
