@@ -1,6 +1,7 @@
 """Climate entity behaviour for air conditioners."""
 
 import copy
+import importlib.util
 from datetime import timedelta
 
 import pytest
@@ -302,3 +303,24 @@ async def test_only_the_three_temperature_names_this_entity_provides_are_aliased
         "current_temperature",
         "target_temperature",
     ]
+
+
+def test_defining_the_climate_class_logs_no_deprecation(caplog: pytest.LogCaptureFixture) -> None:
+    """Home Assistant logs "provides the deprecated <name>" when a climate class is defined with an old name only.
+
+    The check runs once, when the class is defined at import, which is before caplog listens. So climate.py is
+    executed a second time here under another module name, which defines the class again and reruns the check
+    without replacing the module the other tests use.
+    On Home Assistant 2026.10.4, which the harness runs today, the check does not exist, so this passes
+    trivially; it starts proving the point once the harness reaches 2026.11.
+    """
+    from custom_components.frigidaire import climate
+
+    spec = importlib.util.spec_from_file_location("custom_components.frigidaire.climate_probe", climate.__file__)
+    probe = importlib.util.module_from_spec(spec)
+
+    with caplog.at_level("WARNING"):
+        spec.loader.exec_module(probe)
+
+    assert probe.FrigidaireClimate is not climate.FrigidaireClimate
+    assert "provides the deprecated" not in caplog.text
