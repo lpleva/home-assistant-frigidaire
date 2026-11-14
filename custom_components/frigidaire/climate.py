@@ -247,8 +247,17 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         """
         return self.coordinator.reported_fan_speed
 
+    # Home Assistant 2026.11 renamed the temperature properties to native_*
+    # (homeassistant/components/climate/entity.py) and its state code reads only the
+    # native names; 2026.10 has no native_* and reads only the old names. This entity
+    # provides three of them, each under both names, so one release runs on either.
+    # A class that defines both gets no deprecation warning on 2026.11
+    # (migrate_deprecated_entity_members). The old names (temperature_unit,
+    # target_temperature, current_temperature) can go once the minimum Home Assistant
+    # is 2026.11; Home Assistant drops its own shims in 2027.11.
+
     @property
-    def temperature_unit(self):
+    def native_temperature_unit(self):
         """Return the unit of measurement which this thermostat uses.
 
         Falls back to Fahrenheit when the appliance omits temperatureRepresentation:
@@ -260,14 +269,24 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         return FRIGIDAIRE_TO_HA_UNIT.get(unit, UnitOfTemperature.FAHRENHEIT)
 
     @property
-    def target_temperature(self):
+    def temperature_unit(self):
+        """Old name of native_temperature_unit, read by Home Assistant 2026.10."""
+        return self.native_temperature_unit
+
+    @property
+    def native_target_temperature(self):
         """Return the temperature we try to reach."""
         if self._is_optimistic() and self._optimistic_temperature is not None:
             return self._optimistic_temperature
-        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
             return self._details.get(frigidaire.Detail.TARGET_TEMPERATURE_F)
         else:
             return self._details.get(frigidaire.Detail.TARGET_TEMPERATURE_C)
+
+    @property
+    def target_temperature(self):
+        """Old name of native_target_temperature, read by Home Assistant 2026.10."""
+        return self.native_target_temperature
 
     @property
     def hvac_mode(self):
@@ -323,12 +342,17 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         return HVACAction.COOLING
 
     @property
-    def current_temperature(self):
+    def native_current_temperature(self):
         """Return the current temperature."""
-        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
             return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
         else:
             return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C)
+
+    @property
+    def current_temperature(self):
+        """Old name of native_current_temperature, read by Home Assistant 2026.10."""
+        return self.native_current_temperature
 
     @property
     def fan_mode(self):
@@ -357,7 +381,7 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
     @property
     def min_temp(self):
         """Return the minimum temperature."""
-        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
             return 60
 
         return 16
@@ -365,7 +389,7 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
     @property
     def max_temp(self):
         """Return the maximum temperature."""
-        if self.temperature_unit == UnitOfTemperature.FAHRENHEIT:
+        if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT:
             return 90
 
         return 32
@@ -422,9 +446,9 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         if temperature is None:
             return
         temperature = int(temperature)
-        temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
+        temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.native_temperature_unit]
 
-        _LOGGER.debug("Setting temperature to %s %s", temperature, self.temperature_unit)
+        _LOGGER.debug("Setting temperature to %s %s", temperature, self.native_temperature_unit)
         self._execute(self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit))
         self._optimistic_temperature = float(temperature)
         self._set_optimistic_window()
@@ -468,12 +492,12 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
                 # False and the setpoint is deliberately not re-sent; the next poll picks up the
                 # appliance's default instead, which is the trade-off for not doubling write
                 # traffic on every mode change.
-                current_temp = self.target_temperature
+                current_temp = self.native_target_temperature
                 if current_temp is not None:
                     self._execute(
                         self._appliance,
                         frigidaire.Action.set_temperature(
-                            int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
+                            int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.native_temperature_unit]
                         ),
                     )
 
