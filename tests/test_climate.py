@@ -7,6 +7,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 from payloads import LEGACY_AC, TELICA_AC, with_reported
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 from vendor import frigidaire
@@ -150,3 +151,154 @@ async def test_an_unmapped_hvac_mode_warns_once(
     hass.states.get(climate_id(hass))
     hass.states.get(climate_id(hass))
     assert caplog.text.count("Unsupported HVAC mode") == 1
+
+
+# Home Assistant 2026.11 renamed three temperature properties this entity provides to
+# native_* and reads only those; 2026.10 reads only the old names. Both must answer.
+
+CELSIUS_AC = with_reported(
+    LEGACY_AC,
+    temperatureRepresentation="CELSIUS",
+    ambientTemperatureC=24,
+    targetTemperatureC=22,
+)
+
+
+def climate_entity(hass: HomeAssistant):
+    entity = hass.data["climate"].get_entity(climate_id(hass))
+    assert entity is not None
+    return entity
+
+
+def provided_by_the_integration(entity, name: str) -> bool:
+    """True when the integration's own class defines the property, not Home Assistant's base."""
+    return name in vars(type(entity))
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [(LEGACY_AC, "°F"), (CELSIUS_AC, "°C")],
+    ids=["fahrenheit", "celsius"],
+)
+async def test_native_temperature_unit_and_its_old_name(hass: HomeAssistant, setup_entry, record, expected) -> None:
+    await setup_entry([record])
+    entity = climate_entity(hass)
+
+    assert provided_by_the_integration(entity, "native_temperature_unit")
+    assert provided_by_the_integration(entity, "temperature_unit")
+    assert entity.native_temperature_unit == expected
+    assert entity.temperature_unit == expected
+
+
+async def test_native_temperature_unit_falls_back_to_fahrenheit(hass: HomeAssistant, setup_entry) -> None:
+    record = copy.deepcopy(LEGACY_AC)
+    del record["properties"]["reported"]["temperatureRepresentation"]
+    await setup_entry([record])
+    entity = climate_entity(hass)
+
+    assert entity.native_temperature_unit == "°F"
+    assert entity.temperature_unit == "°F"
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [(LEGACY_AC, 75), (CELSIUS_AC, 24)],
+    ids=["fahrenheit", "celsius"],
+)
+async def test_native_current_temperature_and_its_old_name(hass: HomeAssistant, setup_entry, record, expected) -> None:
+    await setup_entry([record])
+    entity = climate_entity(hass)
+
+    assert provided_by_the_integration(entity, "native_current_temperature")
+    assert provided_by_the_integration(entity, "current_temperature")
+    assert entity.native_current_temperature == expected
+    assert entity.current_temperature == expected
+
+
+@pytest.mark.parametrize(
+    ("record", "expected"),
+    [(LEGACY_AC, 72), (CELSIUS_AC, 22)],
+    ids=["fahrenheit", "celsius"],
+)
+async def test_native_target_temperature_and_its_old_name(hass: HomeAssistant, setup_entry, record, expected) -> None:
+    await setup_entry([record])
+    entity = climate_entity(hass)
+
+    assert provided_by_the_integration(entity, "native_target_temperature")
+    assert provided_by_the_integration(entity, "target_temperature")
+    assert entity.native_target_temperature == expected
+    assert entity.target_temperature == expected
+
+
+async def test_old_and_native_target_agree_right_after_a_setpoint_change(hass: HomeAssistant, setup_entry) -> None:
+    """The optimistic setpoint shown before the next poll is the same under both names."""
+    await setup_entry([LEGACY_AC])
+    entity_id = climate_id(hass)
+
+    await hass.services.async_call(
+        "climate", "set_temperature", {"entity_id": entity_id, "temperature": 68}, blocking=True
+    )
+    entity = climate_entity(hass)
+
+    assert entity.native_target_temperature == 68
+    assert entity.target_temperature == 68
+
+
+@pytest.mark.parametrize(
+    ("record", "hass_unit", "setpoint", "commands", "limits"),
+    [
+        (
+            LEGACY_AC,
+            "°F",
+            68,
+            [("temperatureRepresentation", frigidaire.Unit.FAHRENHEIT), ("targetTemperatureF", 68)],
+            (60, 90),
+        ),
+        (
+            CELSIUS_AC,
+            "°C",
+            20,
+            [("temperatureRepresentation", frigidaire.Unit.CELSIUS), ("targetTemperatureC", 20)],
+            (16, 32),
+        ),
+    ],
+    ids=["fahrenheit", "celsius"],
+)
+async def test_setpoint_is_sent_in_the_appliances_own_unit(
+    hass: HomeAssistant, setup_entry, record, hass_unit, setpoint, commands, limits
+) -> None:
+    """The unit sent to Electrolux and the setpoint limits follow the appliance, as before the rename."""
+    hass.config.units = METRIC_SYSTEM if hass_unit == "°C" else US_CUSTOMARY_SYSTEM
+    _entry, stub = await setup_entry([record])
+    entity_id = climate_id(hass)
+
+    await hass.services.async_call(
+        "climate", "set_temperature", {"entity_id": entity_id, "temperature": setpoint}, blocking=True
+    )
+
+    assert stub.commands == commands
+    entity = climate_entity(hass)
+    assert (entity.min_temp, entity.max_temp) == limits
+
+
+async def test_only_the_three_temperature_names_this_entity_provides_are_aliased(
+    hass: HomeAssistant, setup_entry
+) -> None:
+    """Every old name the class defines has its native twin in the same class, so 2026.11 logs no deprecation."""
+    await setup_entry([LEGACY_AC])
+    provided = vars(type(climate_entity(hass)))
+
+    old_names = (
+        "temperature_unit",
+        "current_temperature",
+        "target_temperature",
+        "target_temperature_high",
+        "target_temperature_low",
+    )
+    for old in old_names:
+        assert (old in provided) == (f"native_{old}" in provided), old
+    assert [old for old in old_names if old in provided] == [
+        "temperature_unit",
+        "current_temperature",
+        "target_temperature",
+    ]
