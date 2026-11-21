@@ -226,6 +226,39 @@
       "implemented_in": [],
       "triaged": "2026-10-24",
       "source": "triage"
+    },
+    {
+      "sha": "84a8cf62fcdfdd32322545014f5f616afccfc3dc",
+      "date": "2026-11-21",
+      "subject": "README: note community project for local-only control (#180)",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream README edit only: a note pointing to a third-party ESPHome board-swap project for local control. Docs, no code.",
+      "implemented_in": [],
+      "triaged": "2026-11-21",
+      "source": "triage"
+    },
+    {
+      "sha": "affabe0b1cbb22e7aea5e79966a01da820d1e3b8",
+      "date": "2026-11-21",
+      "subject": "Use the native_* climate temperature properties (#181)",
+      "bucket": "already_here",
+      "status": "already_here",
+      "reason": "Upstream's version of our own fork commit 08dfc7e (in v0.2.14): the climate entity provides HA 2026.11's native_* temperature properties and keeps the old names as aliases. Same change, no logic difference, nothing to take.",
+      "implemented_in": [],
+      "triaged": "2026-11-21",
+      "source": "triage"
+    },
+    {
+      "sha": "a0064a531ded44dbf00555b7e296735e3da96ec4",
+      "date": "2026-11-21",
+      "subject": "Bump version to 0.1.56",
+      "bucket": "decline",
+      "status": "declined",
+      "reason": "Upstream version bump to 0.1.56 in manifest.json; the fork keeps its own version numbers.",
+      "implemented_in": [],
+      "triaged": "2026-11-21",
+      "source": "triage"
     }
   ]
 }
